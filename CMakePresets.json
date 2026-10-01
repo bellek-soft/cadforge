@@ -1,0 +1,44 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "vcpkg-base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "toolchainFile": "${sourceDir}/external/vcpkg/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "CADFORGE_FETCH_MISSING": "OFF",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/external/vcpkg_installed"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release (vcpkg)",
+      "inherits": "vcpkg-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug (vcpkg)",
+      "inherits": "vcpkg-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "system",
+      "displayName": "Release (system OpenCASCADE, no vcpkg)",
+      "binaryDir": "${sourceDir}/build/system",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "release", "configurePreset": "release", "configuration": "Release" },
+    { "name": "debug", "configurePreset": "debug", "configuration": "Debug" },
+    { "name": "system", "configurePreset": "system", "configuration": "Release" }
+  ],
+  "testPresets": [
+    { "name": "release", "configurePreset": "release", "configuration": "Release", "output": { "outputOnFailure": true } },
+    { "name": "debug", "configurePreset": "debug", "configuration": "Debug", "output": { "outputOnFailure": true } },
+    { "name": "system", "configurePreset": "system", "configuration": "Release", "output": { "outputOnFailure": true } }
+  ]
+}

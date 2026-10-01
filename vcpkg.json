@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "cadforge",
+  "version-string": "0.1.0",
+  "description": "CadForge - parametric 3D CAD built on OpenCASCADE, OpenGL and Dear ImGui",
+  "dependencies": [
+    { "name": "opencascade", "default-features": false },
+    "glfw3",
+    { "name": "imgui", "features": [ "docking-experimental", "glfw-binding", "opengl3-binding" ] },
+    "imguizmo",
+    "glm",
+    "nlohmann-json"
+  ],
+  "builtin-baseline": "fbb0f7bb200b07a9eb9081c7a3cf51d1aa1c51a1"
+}

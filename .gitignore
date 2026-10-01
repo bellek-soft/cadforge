@@ -1,0 +1,8 @@
+build/
+external/vcpkg/
+external/vcpkg_installed/
+.vscode/
+.idea/
+.DS_Store
+*.ppm
+CMakeUserPresets.json
