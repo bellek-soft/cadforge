@@ -13,11 +13,13 @@
 
 #include "core/Placement.h"
 #include "core/Types.h"
+#include "geom/Naming.h"
 #include "geom/Shape.h"
 #include "model/Property.h"
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -41,6 +43,13 @@ private:
 };
 
 enum class FeatureState { Pending, Ok, Error };
+
+/// A remembered face / edge reference: the index it had and what it looked like
+/// (used to re-resolve IndexList properties after upstream changes).
+struct SubShapeRef {
+    int index = 0;
+    geom::SubShapeSignature sig;
+};
 
 class Feature {
 public:
@@ -105,6 +114,13 @@ public:
     /// Changes whenever the result shape changes (used by render caches).
     std::uint64_t resultKey() const { return m_resultKey; }
 
+    /// Remembered sub-shape references of IndexList property `key` (topological naming).
+    const std::vector<SubShapeRef>* subShapeRefs(const std::string& key) const
+    {
+        auto it = m_subRefs.find(key);
+        return it == m_subRefs.end() ? nullptr : &it->second;
+    }
+
     static constexpr const char* kPosition = "position";
     static constexpr const char* kRotation = "rotation";
 
@@ -123,6 +139,9 @@ private:
     std::uint64_t m_resultKey = 0;
     FeatureState m_state = FeatureState::Pending;
     std::string m_error;
+
+    std::map<std::string, std::vector<SubShapeRef>> m_subRefs; // IndexList key -> references
+    std::uint64_t m_refsTargetKey = 0; // target result the references were last resolved against
 };
 
 } // namespace cf::model

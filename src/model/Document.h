@@ -76,6 +76,10 @@ public:
     std::string uniqueName(std::string_view base) const;
 
 private:
+    /// Topological naming: re-resolves the IndexList (face / edge) properties of `f`
+    /// against the current result of its sub-shape target. Returns an error message
+    /// if references could not be found any more.
+    std::string resolveSubShapeRefs(Feature& f);
     std::vector<Feature*> topologicalOrder(std::vector<Feature*>& cyclic) const;
     void cacheStore(std::uint64_t key, const geom::Shape& s);
     const geom::Shape* cacheFind(std::uint64_t key) const;

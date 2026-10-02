@@ -25,6 +25,7 @@ A parametric 3D CAD desktop application in modern C++20.
 | Sketch features | Extrude (length, symmetric, reversed) and Revolve (sketch axis or construction line, angle) of closed profiles incl. holes and islands; result as new body or joined with / cut from / intersected with a target body |
 | CSG | Union, Cut, Intersect with any number of tools; inputs are shown as ghosts when the result is selected |
 | Dress-up | Fillet and Chamfer on picked edges, edges can be re-picked later ("Edit...") |
+| Robust references | Picked faces / edges (fillets, chamfers, FEA supports and loads) follow upstream topology changes via geometric signatures; lost references are reported instead of silently jumping |
 | Editing | Property panel generated from feature parameters, live preview while dragging values, move/rotate gizmo (Ctrl = snap) |
 | Selection | Objects / faces / edges (keys 1/2/3), hover highlight, multi-select with Ctrl/Shift |
 | Files | Save/open `.cfp` (JSON), import STEP, export STEP and STL, drag & drop |

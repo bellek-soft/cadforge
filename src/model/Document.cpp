@@ -2,6 +2,7 @@
 
 #include "core/Log.h"
 #include "core/Paths.h"
+#include "geom/Naming.h"
 
 #include <nlohmann/json.hpp>
 
@@ -88,6 +89,39 @@ void valueFromJson(const json& j, Property& p)
 double round4(float v)
 {
     return std::round(double(v) * 10000.0) / 10000.0;
+}
+
+constexpr double kRefAcceptDistance = 0.3; // see geom::signatureDistance
+
+json refsToJson(const std::vector<SubShapeRef>& refs)
+{
+    json out = json::array();
+    for (const auto& r : refs) {
+        const auto& g = r.sig;
+        out.push_back(json::array({r.index, g.geomType, g.center.x, g.center.y, g.center.z, g.dir.x, g.dir.y,
+                                   g.dir.z, g.size, g.radius}));
+    }
+    return out;
+}
+
+std::vector<SubShapeRef> refsFromJson(const json& j)
+{
+    std::vector<SubShapeRef> out;
+    if (!j.is_array())
+        return out;
+    for (const auto& e : j) {
+        if (!e.is_array() || e.size() != 10)
+            continue;
+        SubShapeRef r;
+        r.index = e[0].get<int>();
+        r.sig.geomType = e[1].get<int>();
+        r.sig.center = {e[2].get<double>(), e[3].get<double>(), e[4].get<double>()};
+        r.sig.dir = {e[5].get<double>(), e[6].get<double>(), e[7].get<double>()};
+        r.sig.size = e[8].get<double>();
+        r.sig.radius = e[9].get<double>();
+        out.push_back(r);
+    }
+    return out;
 }
 
 bool isPlacementKey(std::string_view k)
@@ -276,6 +310,82 @@ std::vector<Feature*> Document::topologicalOrder(std::vector<Feature*>& cyclic) 
     return clean;
 }
 
+std::string Document::resolveSubShapeRefs(Feature& f)
+{
+    bool hasRefs = false;
+    for (const auto& p : f.props().all())
+        hasRefs |= p.type == PropertyType::IndexList && !p.subShape.empty();
+    if (!hasRefs)
+        return {};
+    const Feature* target = find(f.subShapeTarget(*this));
+    if (!target || target->m_state != FeatureState::Ok || target->m_localShape.isNull())
+        return {}; // the missing / failed input is reported by the feature itself
+
+    // Nothing to do if the target did not change and every index is known.
+    bool known = true;
+    for (const auto& p : f.props().all()) {
+        if (p.type != PropertyType::IndexList || p.subShape.empty())
+            continue;
+        const auto it = f.m_subRefs.find(p.key);
+        for (int i : std::get<std::vector<int>>(p.value))
+            known &= it != f.m_subRefs.end() &&
+                     std::any_of(it->second.begin(), it->second.end(),
+                                 [&](const SubShapeRef& r) { return r.index == i && r.sig.valid(); });
+    }
+    if (known && target->m_localKey == f.m_refsTargetKey)
+        return {};
+
+    // Signatures live in the target's local frame, so moving it changes nothing.
+    const geom::Shape& shape = target->m_localShape;
+    const double scale = std::max(shape.bounds().diagonal(), 1e-6);
+    std::string lost;
+    for (auto& p : f.props().all()) {
+        if (p.type != PropertyType::IndexList || p.subShape.empty())
+            continue;
+        const auto kind = p.subShape == "face" ? geom::SubShapeKind::Face : geom::SubShapeKind::Edge;
+        const char* kindName = kind == geom::SubShapeKind::Face ? "Face" : "Edge";
+        std::vector<SubShapeRef>& stored = f.m_subRefs[p.key];
+        std::vector<int> indices;
+        std::vector<SubShapeRef> refs;
+        for (int i : std::get<std::vector<int>>(p.value)) {
+            const auto old = std::find_if(stored.begin(), stored.end(),
+                                          [&](const SubShapeRef& r) { return r.index == i && r.sig.valid(); });
+            const geom::SubShapeSignature current = geom::signature(shape, kind, i);
+            int resolved = i;
+            geom::SubShapeSignature sig = current;
+            if (old != stored.end() && geom::signatureDistance(old->sig, current, scale) > 1e-6) {
+                // The referenced face / edge changed: find where it went.
+                const geom::SubShapeMatch m = geom::findBestMatch(shape, kind, old->sig);
+                if (m.index > 0 && m.distance < kRefAcceptDistance) {
+                    resolved = m.index;
+                    sig = geom::signature(shape, kind, m.index);
+                    if (resolved != i)
+                        log::info(f.name(), ": ", kindName, " ", i, " of '", target->name(), "' is now ", kindName,
+                                  " ", resolved);
+                } else {
+                    // Keep the old signature: the reference may come back on a later change.
+                    sig = old->sig;
+                    lost += (lost.empty() ? "" : ", ") + std::to_string(i);
+                }
+            } else if (!current.valid()) {
+                lost += (lost.empty() ? "" : ", ") + std::to_string(i);
+            }
+            if (std::find(indices.begin(), indices.end(), resolved) != indices.end())
+                continue; // two references collapsed onto the same sub-shape
+            indices.push_back(resolved);
+            refs.push_back({resolved, sig});
+        }
+        p.value = indices;
+        stored = std::move(refs);
+        if (!lost.empty()) {
+            return std::string(kindName) + (lost.find(',') == std::string::npos ? " " : "s ") + lost + " of '" +
+                   target->name() + "' could not be found after the last change - re-pick them";
+        }
+    }
+    f.m_refsTargetKey = target->m_localKey;
+    return {};
+}
+
 RecomputeStats Document::recompute()
 {
     const auto t0 = std::chrono::steady_clock::now();
@@ -296,8 +406,13 @@ RecomputeStats Document::recompute()
     }
 
     for (Feature* f : order) {
+        // 0) Topological naming: follow referenced faces / edges through upstream changes.
+        const std::string refError = resolveSubShapeRefs(*f);
+
         // 1) Content key of the local result: type + parameters + input results.
         std::string src(f->type());
+        if (!refError.empty())
+            src += "|referror=" + refError;
         for (const auto& p : f->props().all())
             if (!isPlacementKey(p.key))
                 src += "|" + p.key + "=" + valueToJson(p).dump();
@@ -311,7 +426,12 @@ RecomputeStats Document::recompute()
         // 2) Execute or reuse.
         if (localKey != f->m_localKey || f->m_state == FeatureState::Pending) {
             f->m_localKey = localKey;
-            if (!f->producesGeometry()) {
+            if (!refError.empty()) {
+                f->m_localShape = {};
+                f->m_state = FeatureState::Error;
+                f->m_error = refError;
+                log::warn(f->name(), ": ", refError);
+            } else if (!f->producesGeometry()) {
                 try {
                     f->validate(ctx);
                     f->m_state = FeatureState::Ok;
@@ -408,6 +528,12 @@ json Document::toJson() const
             {"color", {round4(c.r), round4(c.g), round4(c.b), round4(c.a)}},
             {"props", std::move(props)},
         };
+        json refs = json::object();
+        for (const auto& [key, list] : f->m_subRefs)
+            if (!list.empty())
+                refs[key] = refsToJson(list);
+        if (!refs.empty())
+            jf["refs"] = std::move(refs);
         json data;
         f->saveData(data);
         if (!data.is_null())
@@ -449,6 +575,9 @@ void Document::loadJson(const json& j)
                     valueFromJson(*v, p); // unknown keys are ignored (forward compatible)
         if (auto data = jf.find("data"); data != jf.end())
             f->loadData(*data);
+        if (auto refs = jf.find("refs"); refs != jf.end() && refs->is_object())
+            for (auto it = refs->begin(); it != refs->end(); ++it)
+                f->m_subRefs[it.key()] = refsFromJson(it.value());
         maxId = std::max(maxId, f->id());
         loaded.push_back(std::move(f));
     }

@@ -100,6 +100,29 @@ get defaults, so the format can evolve. Bump `formatVersion` for breaking change
 
 ## 5. Roadmap
 
+### Topological naming (implemented in v0.4)
+
+Faces and edges are referenced by `IndexList` properties (fillet / chamfer edges, faces of supports and loads).
+Indices alone break as soon as an upstream change alters the topology (e.g. another hole renumbers every edge).
+Each reference therefore also stores a **geometric signature** of what it pointed to (`geom::SubShapeSignature`:
+surface / curve type, centroid, normal or axis, radius, area / length), taken in the local frame of the
+referenced feature so that moving it changes nothing.
+
+Before a feature is evaluated, `Document::resolveSubShapeRefs` checks its references against the current
+result of `Feature::subShapeTarget()`:
+
+1. unchanged target and known indices -> nothing to do (cheap);
+2. the stored index still has the same signature -> keep it;
+3. otherwise the best match is searched (same geometry type required; distance = centroid shift relative to the
+   model size + axis deviation + radius change + size ratio). Matches below a threshold replace the index (logged),
+   and the signature is refreshed so gradual edits are followed;
+4. nothing similar any more -> the feature goes into the error state with "re-pick" advice. The old signature
+   is kept, so the reference recovers if the geometry comes back (e.g. undo of the upstream change).
+
+New or re-picked indices simply capture fresh signatures. References are stored in the file under `"refs"`.
+Limitations: a heuristic, not history-based; symmetric look-alike faces that move far in one step may be
+confused. A future history layer (`BRepTools_History` of booleans / fillets) can plug into the same place.
+
 ### Sketcher (implemented in v0.3)
 
 ```
@@ -130,10 +153,7 @@ get defaults, so the format can evolve. Bump `formatVersion` for breaking change
 
 * Sweep / Loft features -> `geom` wrappers around `BRepOffsetAPI_*`; sketches on faces of solids.
 * Mirror / linear and polar patterns, shell, draft.
-* **Topological naming:** fillet edges are stored as 1-based edge indices of the input shape. They stay
-  valid while the input's topology does not change. A robust solution (history-based naming through
-  `BRepTools_History` / `BRepAlgoAPI_*::Modified/Generated`, or geometric signatures) is planned and is
-  isolated in `EdgeFeature`.
+* **Topological naming (implemented in v0.4):** see the section above.
 * Asynchronous recompute (worker thread + cancellation) for heavy models.
 
 ### FEA (implemented in v0.2 — linear static)
