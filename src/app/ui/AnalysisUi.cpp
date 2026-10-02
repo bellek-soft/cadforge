@@ -6,6 +6,8 @@
 
 #include "app/AppContext.h"
 #include "app/FileDialogs.h"
+
+#include <LucideIcons.h>
 #include "fea/Mesher.h"
 #include "fea/Post.h"
 #include "model/features/FeaFeatures.h"
@@ -116,18 +118,18 @@ void outlinedText(ImDrawList* dl, ImVec2 p, ImU32 col, const char* text)
 
 void drawAnalysisToolbar(AppContext& ctx, Toolbar& tb)
 {
-    if (tb.button("Study", "New static analysis of the selected solid"))
+    if (tb.button(ICON_STUDY, "Study", "New analysis (static or modal) of the selected solid"))
         ctx.createAnalysisFromSelection();
-    if (tb.button("Fixed", "Fixed support on the selected faces"))
+    if (tb.button(ICON_FIXED, "Fixed", "Fixed support on the selected faces"))
         ctx.createBoundaryFromSelection(model::FixedSupportFeature::kType);
-    if (tb.button("Force", "Force on the selected faces"))
+    if (tb.button(ICON_FORCE, "Force", "Force on the selected faces"))
         ctx.createBoundaryFromSelection(model::ForceFeature::kType);
-    if (tb.button("Pressure", "Pressure on the selected faces"))
+    if (tb.button(ICON_PRESSURE, "Pressure", "Pressure on the selected faces"))
         ctx.createBoundaryFromSelection(model::PressureFeature::kType);
-    if (tb.button("Refine", "Smaller elements on the selected faces"))
+    if (tb.button(ICON_REFINE, "Refine", "Smaller elements on the selected faces"))
         ctx.createBoundaryFromSelection(model::MeshRefinementFeature::kType);
     ImGui::BeginDisabled(ctx.fea.busy());
-    if (tb.button("Solve", "Mesh and solve the analysis (F5)"))
+    if (tb.button(ICON_SOLVE, "Solve", "Mesh and solve the analysis (F5)"))
         solveCommand(ctx);
     ImGui::EndDisabled();
 }

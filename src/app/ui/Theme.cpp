@@ -2,15 +2,32 @@
 
 #include "core/Log.h"
 
+#include <LucideIcons.h>
+
 #include <imgui_internal.h>
 
+#include <cstdio>
 #include <filesystem>
 
 namespace cf::app::ui {
 
 namespace {
 
-void loadFont()
+/// Merges the embedded Lucide icon font into the last added font.
+void mergeIcons(float size)
+{
+    ImFontConfig cfg;
+    cfg.MergeMode = true;
+    cfg.FontDataOwnedByAtlas = false;
+    cfg.PixelSnapH = true;
+    cfg.GlyphOffset = ImVec2(0.0f, size * 0.12f);
+    cfg.GlyphMinAdvanceX = size; // monospaced icons
+    std::snprintf(cfg.Name, sizeof(cfg.Name), "Lucide icons");
+    ImGui::GetIO().Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(icons::fontData()), int(icons::fontSize()),
+                                               size, &cfg);
+}
+
+void loadFont(float size)
 {
     ImGuiIO& io = ImGui::GetIO();
     // Use a good-looking system UI font when available; fall back to ImGui's
@@ -36,20 +53,71 @@ void loadFont()
     for (const char* path : candidates) {
         std::error_code ec;
         if (std::filesystem::exists(path, ec)) {
-            if (io.Fonts->AddFontFromFileTTF(path, 15.0f)) {
+            if (io.Fonts->AddFontFromFileTTF(path, size)) {
                 log::info("UI font: ", path);
+                mergeIcons(size);
                 return;
             }
         }
     }
-    io.Fonts->AddFontDefault();
+    ImFontConfig def;
+    def.SizePixels = size;
+    io.Fonts->AddFontDefault(&def);
+    mergeIcons(size);
 }
 
 } // namespace
 
-void setupStyle(float dpiScale)
+void applyTheme(bool light)
 {
     ImGui::StyleColorsDark();
+    ImVec4* c = ImGui::GetStyle().Colors;
+    const ImVec4 bg0 = light ? ImVec4(0.85f, 0.86f, 0.88f, 1.0f) : ImVec4(0.105f, 0.115f, 0.13f, 1.0f);
+    const ImVec4 bg1 = light ? ImVec4(0.94f, 0.945f, 0.955f, 1.0f) : ImVec4(0.14f, 0.15f, 0.17f, 1.0f);
+    const ImVec4 bg2 = light ? ImVec4(0.80f, 0.82f, 0.85f, 1.0f) : ImVec4(0.19f, 0.205f, 0.23f, 1.0f);
+    const ImVec4 bg3 = light ? ImVec4(0.72f, 0.75f, 0.79f, 1.0f) : ImVec4(0.25f, 0.27f, 0.30f, 1.0f);
+    const ImVec4 accent(0.29f, 0.56f, 0.89f, 1.0f);
+    const ImVec4 accentDim(0.29f, 0.56f, 0.89f, 0.55f);
+
+    c[ImGuiCol_Text] = light ? ImVec4(0.10f, 0.11f, 0.13f, 1.0f) : ImVec4(0.90f, 0.91f, 0.93f, 1.0f);
+    c[ImGuiCol_TextDisabled] = light ? ImVec4(0.42f, 0.45f, 0.49f, 1.0f) : ImVec4(0.50f, 0.53f, 0.57f, 1.0f);
+    c[ImGuiCol_WindowBg] = bg1;
+    c[ImGuiCol_ChildBg] = bg1;
+    c[ImGuiCol_PopupBg] = light ? ImVec4(0.97f, 0.975f, 0.98f, 0.98f) : ImVec4(0.12f, 0.13f, 0.15f, 0.98f);
+    c[ImGuiCol_Border] = light ? ImVec4(0.70f, 0.72f, 0.75f, 1.0f) : ImVec4(0.07f, 0.075f, 0.085f, 1.0f);
+    c[ImGuiCol_FrameBg] = bg0;
+    c[ImGuiCol_FrameBgHovered] = bg2;
+    c[ImGuiCol_FrameBgActive] = bg3;
+    c[ImGuiCol_TitleBg] = bg0;
+    c[ImGuiCol_TitleBgActive] = bg0;
+    c[ImGuiCol_MenuBarBg] = bg0;
+    c[ImGuiCol_ScrollbarBg] = bg1;
+    c[ImGuiCol_CheckMark] = accent;
+    c[ImGuiCol_SliderGrab] = accent;
+    c[ImGuiCol_SliderGrabActive] = accent;
+    c[ImGuiCol_Button] = bg2;
+    c[ImGuiCol_ButtonHovered] = bg3;
+    c[ImGuiCol_ButtonActive] = accentDim;
+    c[ImGuiCol_Header] = ImVec4(0.29f, 0.56f, 0.89f, 0.30f);
+    c[ImGuiCol_HeaderHovered] = ImVec4(0.29f, 0.56f, 0.89f, 0.40f);
+    c[ImGuiCol_HeaderActive] = accentDim;
+    c[ImGuiCol_Separator] = light ? ImVec4(0.70f, 0.72f, 0.75f, 1.0f) : ImVec4(0.07f, 0.075f, 0.085f, 1.0f);
+    c[ImGuiCol_Tab] = bg0;
+    c[ImGuiCol_TabHovered] = bg2;
+    c[ImGuiCol_TabSelected] = bg1;
+    c[ImGuiCol_TabSelectedOverline] = accent;
+    c[ImGuiCol_TabDimmed] = bg0;
+    c[ImGuiCol_TabDimmedSelected] = bg1;
+    c[ImGuiCol_DockingPreview] = accentDim;
+    c[ImGuiCol_DockingEmptyBg] = bg0;
+    c[ImGuiCol_TableHeaderBg] = bg0;
+    c[ImGuiCol_TableRowBgAlt] = light ? ImVec4(0, 0, 0, 0.03f) : ImVec4(1, 1, 1, 0.025f);
+    c[ImGuiCol_NavCursor] = accent;
+
+}
+
+void setupStyle(float dpiScale, bool light, float fontSize)
+{
     ImGuiStyle& s = ImGui::GetStyle();
     s.WindowRounding = 4.0f;
     s.ChildRounding = 4.0f;
@@ -68,54 +136,13 @@ void setupStyle(float dpiScale)
     s.ScrollbarSize = 13.0f;
     s.WindowMenuButtonPosition = ImGuiDir_None;
 
-    ImVec4* c = s.Colors;
-    const ImVec4 bg0(0.105f, 0.115f, 0.13f, 1.0f);
-    const ImVec4 bg1(0.14f, 0.15f, 0.17f, 1.0f);
-    const ImVec4 bg2(0.19f, 0.205f, 0.23f, 1.0f);
-    const ImVec4 bg3(0.25f, 0.27f, 0.30f, 1.0f);
-    const ImVec4 accent(0.29f, 0.56f, 0.89f, 1.0f);
-    const ImVec4 accentDim(0.29f, 0.56f, 0.89f, 0.55f);
-
-    c[ImGuiCol_Text] = ImVec4(0.90f, 0.91f, 0.93f, 1.0f);
-    c[ImGuiCol_TextDisabled] = ImVec4(0.50f, 0.53f, 0.57f, 1.0f);
-    c[ImGuiCol_WindowBg] = bg1;
-    c[ImGuiCol_ChildBg] = bg1;
-    c[ImGuiCol_PopupBg] = ImVec4(0.12f, 0.13f, 0.15f, 0.98f);
-    c[ImGuiCol_Border] = ImVec4(0.07f, 0.075f, 0.085f, 1.0f);
-    c[ImGuiCol_FrameBg] = bg0;
-    c[ImGuiCol_FrameBgHovered] = bg2;
-    c[ImGuiCol_FrameBgActive] = bg3;
-    c[ImGuiCol_TitleBg] = bg0;
-    c[ImGuiCol_TitleBgActive] = bg0;
-    c[ImGuiCol_MenuBarBg] = bg0;
-    c[ImGuiCol_ScrollbarBg] = bg1;
-    c[ImGuiCol_CheckMark] = accent;
-    c[ImGuiCol_SliderGrab] = accent;
-    c[ImGuiCol_SliderGrabActive] = accent;
-    c[ImGuiCol_Button] = bg2;
-    c[ImGuiCol_ButtonHovered] = bg3;
-    c[ImGuiCol_ButtonActive] = accentDim;
-    c[ImGuiCol_Header] = ImVec4(0.29f, 0.56f, 0.89f, 0.30f);
-    c[ImGuiCol_HeaderHovered] = ImVec4(0.29f, 0.56f, 0.89f, 0.40f);
-    c[ImGuiCol_HeaderActive] = accentDim;
-    c[ImGuiCol_Separator] = ImVec4(0.07f, 0.075f, 0.085f, 1.0f);
-    c[ImGuiCol_Tab] = bg0;
-    c[ImGuiCol_TabHovered] = bg2;
-    c[ImGuiCol_TabSelected] = bg1;
-    c[ImGuiCol_TabSelectedOverline] = accent;
-    c[ImGuiCol_TabDimmed] = bg0;
-    c[ImGuiCol_TabDimmedSelected] = bg1;
-    c[ImGuiCol_DockingPreview] = accentDim;
-    c[ImGuiCol_DockingEmptyBg] = bg0;
-    c[ImGuiCol_TableHeaderBg] = bg0;
-    c[ImGuiCol_TableRowBgAlt] = ImVec4(1, 1, 1, 0.025f);
-    c[ImGuiCol_NavCursor] = accent;
+    applyTheme(light);
 
     if (dpiScale > 0.0f && dpiScale != 1.0f) {
         s.ScaleAllSizes(dpiScale);
         s.FontScaleDpi = dpiScale;
     }
-    loadFont();
+    loadFont(fontSize);
 }
 
 void buildDefaultLayout(ImGuiID dockspaceId)

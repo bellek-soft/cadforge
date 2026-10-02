@@ -89,7 +89,19 @@ get defaults, so the format can evolve. Bump `formatVersion` for breaking change
 * `MeshData::scalars` + the colormap in the mesh shader already support per-vertex result fields
   (needed for FEA results).
 
-## 4. Adding a new feature type
+## 4. Application services
+
+* `app/Preferences` - JSON in `paths::configDir()/preferences.json` (mouse buttons, theme, colors, font size,
+  decimals, autosave interval, recent files). Missing / unknown keys fall back to defaults.
+* `app/Autosave` - while there are unsaved changes the document is written every N minutes to
+  `configDir()/autosave/session-*.cfp` (atomic rename). The file is removed on save and on a clean exit; leftovers
+  are offered in a recovery dialog at the next start.
+* Measure tool - `geom::measureEntity` / `geom::measureDistance` (`BRepGProp`, `BRepExtrema_DistShapeShape`) on
+  the current selection; `ui/MeasureUi.cpp` shows the window and draws the distance in the view.
+* Icons - a subset of the Lucide icon font is embedded (`third_party/lucide`) and merged into the UI font, so icons
+  are just UTF-8 strings (`ICON_SAVE " Save"`).
+
+## 5. Adding a new feature type
 
 1. Derive from `model::Feature`, declare properties in the constructor, implement `type()`, `typeLabel()`
    and `execute()` using `geom` functions (add new ones to `geom` if needed).
@@ -98,7 +110,7 @@ get defaults, so the format can evolve. Bump `formatVersion` for breaking change
 3. That's it: UI, files, undo, caching and dependency handling work automatically. Add a toolbar/menu
    entry if it needs a special creation command (like booleans created from the selection).
 
-## 5. Roadmap
+## 6. Roadmap
 
 ### Topological naming (implemented in v0.4)
 

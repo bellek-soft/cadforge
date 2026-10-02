@@ -1,14 +1,18 @@
 #include "app/ui/SketchUi.h"
 #include "app/ui/Ui.h"
 
+#include <LucideIcons.h>
+
 #include "app/AppContext.h"
 #include "app/Commands.h"
+#include "core/Paths.h"
 #include "model/features/PartFeatures.h"
 #include "model/features/SketchFeatures.h"
 
 #include <imgui_internal.h>
 
 #include <chrono>
+#include <filesystem>
 #include <cstdio>
 
 namespace cf::app::ui {
@@ -48,10 +52,35 @@ void drawMainMenu(AppContext& ctx, bool& quitRequested)
         return;
 
     if (ImGui::BeginMenu("File")) {
-        if (ImGui::MenuItem("New", sc("N").c_str())) cmd::newFile(ctx);
-        if (ImGui::MenuItem("Open...", sc("O").c_str())) cmd::open(ctx);
+        if (ImGui::MenuItem(ICON_NEW " New", sc("N").c_str())) cmd::newFile(ctx);
+        if (ImGui::MenuItem(ICON_OPEN " Open...", sc("O").c_str())) cmd::open(ctx);
+        if (ImGui::BeginMenu(ICON_HISTORY " Open Recent", !ctx.prefs.recentFiles.empty())) {
+            std::string chosen;
+            for (const auto& f : ctx.prefs.recentFiles) {
+                const std::string name = paths::toUtf8(paths::fromUtf8(f).filename());
+                if (ImGui::MenuItem((name + "##" + f).c_str()))
+                    chosen = f;
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", f.c_str());
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Clear List")) {
+                ctx.prefs.recentFiles.clear();
+                ctx.savePreferences();
+            }
+            ImGui::EndMenu();
+            if (!chosen.empty()) {
+                if (std::filesystem::exists(paths::fromUtf8(chosen))) {
+                    ctx.guardUnsaved([&ctx, chosen] { ctx.openDocument(chosen); });
+                } else {
+                    ctx.status("File not found: " + chosen, true);
+                    ctx.prefs.removeRecentFile(chosen);
+                    ctx.savePreferences();
+                }
+            }
+        }
         ImGui::Separator();
-        if (ImGui::MenuItem("Save", sc("S").c_str())) cmd::save(ctx);
+        if (ImGui::MenuItem(ICON_SAVE " Save", sc("S").c_str())) cmd::save(ctx);
         if (ImGui::MenuItem("Save As...", sc("Shift+S").c_str())) cmd::saveAs(ctx);
         ImGui::Separator();
         if (ImGui::MenuItem("Import STEP...", sc("I").c_str())) cmd::importStep(ctx);
@@ -84,6 +113,8 @@ void drawMainMenu(AppContext& ctx, bool& quitRequested)
         if (ImGui::MenuItem("Select Objects", "1", ctx.pickFilter == PickFilter::Object)) ctx.pickFilter = PickFilter::Object;
         if (ImGui::MenuItem("Select Faces", "2", ctx.pickFilter == PickFilter::Face)) ctx.pickFilter = PickFilter::Face;
         if (ImGui::MenuItem("Select Edges", "3", ctx.pickFilter == PickFilter::Edge)) ctx.pickFilter = PickFilter::Edge;
+        ImGui::Separator();
+        if (ImGui::MenuItem(ICON_SETTINGS " Preferences...", sc(",").c_str())) ctx.showPreferences = true;
         ImGui::EndMenu();
     }
 
@@ -121,6 +152,7 @@ void drawMainMenu(AppContext& ctx, bool& quitRequested)
     if (ImGui::BeginMenu("View")) {
         if (ImGui::MenuItem("Fit All", "F")) ctx.fitAll();
         if (ImGui::MenuItem("Fit Selection", "Shift+V")) ctx.fitSelection();
+        ImGui::MenuItem(ICON_MEASURE " Measure", "M", &ctx.measureMode);
         ImGui::Separator();
         if (ImGui::MenuItem("Isometric", "Keypad 0")) ctx.camera.setStandardView(StandardView::Isometric);
         if (ImGui::MenuItem("Front", "Keypad 1")) ctx.camera.setStandardView(StandardView::Front);
@@ -136,7 +168,8 @@ void drawMainMenu(AppContext& ctx, bool& quitRequested)
         ImGui::MenuItem("Edges", nullptr, &ctx.settings.showEdges);
         ImGui::MenuItem("Grid", "G", &ctx.settings.showGrid);
         ImGui::SetNextItemWidth(120);
-        ImGui::SliderFloat("Edge width", &ctx.settings.edgeWidth, 0.5f, 4.0f, "%.1f px");
+        if (ImGui::SliderFloat("Edge width", &ctx.prefs.edgeWidth, 0.5f, 4.0f, "%.1f px"))
+            ctx.applyPreferences();
         ImGui::Separator();
         ImGui::MenuItem("Console", nullptr, &ctx.showConsole);
         ImGui::MenuItem("ImGui Demo", nullptr, &ctx.showImGuiDemo);
@@ -202,6 +235,7 @@ void handleShortcuts(AppContext& ctx, bool& quitRequested)
     };
 
     if (pressed(ImGuiMod_Ctrl | ImGuiKey_S)) cmd::save(ctx);
+    if (pressed(ImGuiMod_Ctrl | ImGuiKey_Comma)) ctx.showPreferences = !ctx.showPreferences;
     if (handleSketchShortcuts(ctx))
         return; // sketch edit mode has its own keys
 
@@ -236,6 +270,7 @@ void handleShortcuts(AppContext& ctx, bool& quitRequested)
     if (pressed(ImGuiKey_E)) ctx.gizmo = GizmoMode::Rotate;
     if (pressed(ImGuiKey_Q)) ctx.gizmo = GizmoMode::None;
     if (pressed(ImGuiKey_F)) ctx.fitAll();
+    if (pressed(ImGuiKey_M)) ctx.measureMode = !ctx.measureMode;
     if (pressed(ImGuiMod_Shift | ImGuiKey_V)) ctx.fitSelection();
     if (pressed(ImGuiKey_G)) ctx.settings.showGrid = !ctx.settings.showGrid;
     if (pressed(ImGuiKey_O) || pressed(ImGuiKey_Keypad5)) ctx.camera.setOrthographic(!ctx.camera.orthographic());

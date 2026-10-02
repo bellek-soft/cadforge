@@ -6,6 +6,8 @@ add_executable(CadForge
     Commands.cpp
     SceneView.cpp
     SketchEditor.cpp
+    Preferences.cpp
+    Autosave.cpp
     FeaController.cpp
     FileDialogs.cpp
     ui/Theme.cpp
@@ -16,7 +18,9 @@ add_executable(CadForge
     ui/Console.cpp
     ui/Dialogs.cpp
     ui/AnalysisUi.cpp
-    ui/SketchUi.cpp)
+    ui/SketchUi.cpp
+    ui/MeasureUi.cpp
+    ui/PreferencesUi.cpp)
 
 target_include_directories(CadForge PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_link_libraries(CadForge PRIVATE
@@ -24,6 +28,7 @@ target_link_libraries(CadForge PRIVATE
     cadforge::fea
     cadforge::render
     cadforge::pfd
+    cadforge::lucide
     imgui::imgui
     imguizmo::imguizmo
     glfw)

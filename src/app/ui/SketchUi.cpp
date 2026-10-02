@@ -5,6 +5,8 @@
 #include "app/ui/Toolbar.h"
 #include "app/ui/Ui.h"
 
+#include <LucideIcons.h>
+
 #include "app/AppContext.h"
 #include "model/features/SketchFeatures.h"
 
@@ -749,22 +751,22 @@ const ConstraintButton kDimensionButtons[] = {
 void drawSketchToolbar(AppContext& ctx, Toolbar& tb)
 {
     SketchEditor& ed = ctx.sketchEdit;
-    struct T { SketchTool t; const char* label; const char* tip; };
+    struct T { SketchTool t; const char* icon; const char* label; const char* tip; };
     static const T tools[] = {
-        {SketchTool::Select, "Select", "Select / drag geometry (Esc)"},
-        {SketchTool::Line, "Line", "Polyline: click points, right click or Esc ends (L)"},
-        {SketchTool::Rectangle, "Rect", "Rectangle: two corners (R)"},
-        {SketchTool::Circle, "Circle", "Circle: center, then a point on the circle (C)"},
-        {SketchTool::Arc, "Arc", "Arc: center, start, end - counter-clockwise (A)"},
-        {SketchTool::Point, "Point", "Point (P)"},
+        {SketchTool::Select, ICON_SELECT, "Select", "Select / drag geometry (Esc)"},
+        {SketchTool::Line, ICON_LINE, "Line", "Polyline: click points, right click or Esc ends (L)"},
+        {SketchTool::Rectangle, ICON_RECT, "Rect", "Rectangle: two corners (R)"},
+        {SketchTool::Circle, ICON_CIRCLE, "Circle", "Circle: center, then a point on the circle (C)"},
+        {SketchTool::Arc, ICON_ARC, "Arc", "Arc: center, start, end - counter-clockwise (A)"},
+        {SketchTool::Point, ICON_POINT, "Point", "Point (P)"},
     };
     for (const auto& t : tools)
-        if (tb.button(t.label, t.tip, ed.tool == t.t))
+        if (tb.button(t.icon, t.label, t.tip, ed.tool == t.t))
             ed.setTool(t.t);
-    if (tb.button("Constr", "Toggle construction geometry for the selection, or for new geometry (G)",
+    if (tb.button(ICON_CONSTRUCTION, "Constr", "Toggle construction geometry for the selection, or for new geometry (G)",
                   ed.constructionMode))
         ed.toggleConstruction(ctx);
-    if (tb.button("Snap", "Snap free points to the grid", ed.gridSnap))
+    if (tb.button(ICON_SNAP, "Snap", "Snap free points to the grid", ed.gridSnap))
         ed.gridSnap = !ed.gridSnap;
     tb.separator();
     for (const auto& b : kConstraintButtons) {
@@ -782,16 +784,16 @@ void drawSketchToolbar(AppContext& ctx, Toolbar& tb)
     }
     tb.separator();
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.25f, 1.0f));
-    if (tb.button("Close", "Finish editing the sketch (Enter)"))
+    if (tb.button(ICON_CHECK, "Close", "Finish editing the sketch (Enter)"))
         ed.finish(ctx);
     ImGui::PopStyleColor();
-    if (tb.button("Cancel", "Discard the changes made in this session"))
+    if (tb.button(ICON_OFF, "Cancel", "Discard the changes made in this session"))
         ed.cancel(ctx);
 }
 
 void drawSketchCreateToolbar(AppContext& ctx, Toolbar& tb)
 {
-    if (tb.button("Sketch", "New sketch on a base plane"))
+    if (tb.button(ICON_SKETCH, "Sketch", "New sketch on a base plane"))
         ImGui::OpenPopup("##newsketch");
     if (ImGui::BeginPopup("##newsketch")) {
         ImGui::TextDisabled("Sketch plane");
@@ -800,9 +802,9 @@ void drawSketchCreateToolbar(AppContext& ctx, Toolbar& tb)
         if (ImGui::MenuItem("YZ (right)")) ctx.createSketch(model::SketchFeature::YZ);
         ImGui::EndPopup();
     }
-    if (tb.button("Extrude", "Extrude the selected sketch (select a body too to join it)"))
+    if (tb.button(ICON_EXTRUDE, "Extrude", "Extrude the selected sketch (select a body too to join it)"))
         ctx.profileFeatureFromSelection("Part::Extrude");
-    if (tb.button("Revolve", "Revolve the selected sketch around an axis"))
+    if (tb.button(ICON_REVOLVE, "Revolve", "Revolve the selected sketch around an axis"))
         ctx.profileFeatureFromSelection("Part::Revolve");
 }
 

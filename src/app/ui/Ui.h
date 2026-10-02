@@ -14,7 +14,9 @@ namespace cf::app::ui {
 
 /// Style + fonts. `dpiScale` is the monitor content scale (1 on macOS, where
 /// Retina is handled by the framebuffer scale).
-void setupStyle(float dpiScale);
+void setupStyle(float dpiScale, bool light = false, float fontSize = 15.0f);
+/// Switches the colors between the dark and light theme (at runtime).
+void applyTheme(bool light);
 
 /// Creates the initial dock layout (only when no saved layout exists).
 void buildDefaultLayout(ImGuiID dockspaceId);
@@ -27,6 +29,10 @@ void drawViewport(AppContext& ctx);
 void drawConsole(AppContext& ctx);
 void drawDialogs(AppContext& ctx, bool& quitRequested);
 void handleShortcuts(AppContext& ctx, bool& quitRequested);
+void drawPreferences(AppContext& ctx);
+/// Measure tool: floating results window + viewport overlay (see MeasureUi.cpp).
+void drawMeasureWindow(AppContext& ctx);
+void drawMeasureOverlay(AppContext& ctx, ImDrawList* dl, const ImVec2& origin);
 
 // Analysis (FEA) UI, see AnalysisUi.cpp
 void drawAnalysisMenu(AppContext& ctx);

@@ -31,6 +31,8 @@ A parametric 3D CAD desktop application in modern C++20.
 | Files | Save/open `.cfp` (JSON), import STEP, export STEP and STL, drag & drop |
 | View | Turntable orbit, pan, zoom-to-cursor, fit, standard views, perspective/orthographic, adaptive grid, axis triad |
 | History | Unlimited-ish (200 steps) undo/redo of every change |
+| Measure | Volume / area / length / radius / normal of objects, faces and edges; minimum distance (with dX, dY, dZ) and angle between two picks, drawn in the view |
+| Comfort | Recent files, autosave every N minutes with crash recovery, Lucide toolbar icons (or icons only), preferences window (mouse buttons, zoom, dark / light theme, colors, font size, decimals, autosave) |
 | Analysis | Static study per solid, material library (or custom E, ν, ρ, yield), fixed supports (per axis), forces, pressures, gravity; Tet4/Tet10 mesh with adjustable size; background meshing/solving with progress; contour plots of von Mises / displacement with deformed shape, legend, safety factor and reaction check |
 | Analysis+ | Modal analysis (natural frequencies, mode shapes, effective mass) with Spectra; local mesh refinement on selected faces; section view through the mesh (X/Y/Z plane, flip); probe tool (hover / click to pin values); VTK export (.vtu) of mesh, displacements, stresses and mode shapes for ParaView |
 
@@ -88,7 +90,7 @@ again; vcpkg installs what is missing.
 
 | Action | Mouse / key |
 |---|---|
-| Orbit | Right drag, Alt + Left drag (trackpad), Shift + Middle drag |
+| Orbit | Right drag, Alt + Left drag (trackpad), Shift + Middle drag (buttons configurable) |
 | Pan | Middle drag, Shift + Right drag |
 | Zoom | Wheel (zooms towards the cursor) |
 | Select | Left click, Ctrl/Shift/Cmd + click adds |
@@ -98,6 +100,8 @@ again; vcpkg installs what is missing.
 | Fillet / Chamfer | select edges, then `Shift+F` / `Shift+C` |
 | Views | Keypad `0` iso, `1` front, `3` right, `7` top (Ctrl = opposite), `F` fit all, `O` ortho |
 | Undo / Redo | `Ctrl+Z` / `Ctrl+Shift+Z` (Cmd on macOS) |
+| Measure | `M` toggles the measure tool (Ctrl+click a second item) |
+| Preferences | `Ctrl+,` (Cmd+, on macOS) - orbit / pan buttons are configurable there |
 | Solve analysis | `F5` |
 | Sketch | toolbar **Sketch** (pick a plane), double-click a sketch to edit; `Enter`/`Esc` closes |
 | Sketch tools | `L` line, `R` rectangle (or radius with a circle selected), `C` circle, `A` arc, `P` point, `G` construction |
@@ -148,7 +152,8 @@ src/model    parametric document, features, recompute, undo, I/O  no GL, no UI
 src/render   OpenGL 4.1 renderer, camera, picking                 knows meshes, not features
 src/app      GLFW + ImGui application, panels, commands
 tests        kernel + model unit tests (no framework needed)
-third_party  vendored glad (GL 4.1 loader), portable-file-dialogs, AMGCL and Spectra (header-only), PlaneGCS
+third_party  vendored glad (GL 4.1 loader), portable-file-dialogs, AMGCL and Spectra (header-only), PlaneGCS,
+             Lucide icon font subset
 docs         architecture notes and roadmap (CSG, FEA)
 ```
 
@@ -157,5 +162,6 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and how to exten
 ## License notes
 
 OpenCASCADE is LGPL-2.1 with an exception, Netgen is LGPL-2.1, PlaneGCS (from FreeCAD, vendored in
-`third_party/planegcs` with its license) is LGPL-2.1+, Eigen and Spectra (vendored, header-only) are MPL-2.0, AMGCL is MIT; Dear ImGui, ImGuizmo, GLFW, glm, nlohmann-json and glad are MIT/zlib-style;
+`third_party/planegcs` with its license) is LGPL-2.1+, Eigen and Spectra (vendored, header-only) are MPL-2.0, AMGCL is MIT, the
+embedded Lucide icon subset is ISC; Dear ImGui, ImGuizmo, GLFW, glm, nlohmann-json and glad are MIT/zlib-style;
 portable-file-dialogs is WTFPL.

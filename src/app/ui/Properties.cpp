@@ -86,7 +86,7 @@ bool featureCombo(AppContext& ctx, const Feature& owner, const char* id, Feature
 EditResult editProperty(AppContext& ctx, Feature& f, Property& p)
 {
     EditResult r;
-    std::string fmt = p.format.empty() ? "%.3f" : p.format;
+    std::string fmt = p.format.empty() ? ctx.prefs.numberFormat() : p.format;
     if (!p.unit.empty())
         fmt += " " + p.unit;
 

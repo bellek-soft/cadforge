@@ -2,6 +2,8 @@
 #include "app/ui/SketchUi.h"
 #include "app/ui/Toolbar.h"
 
+#include <LucideIcons.h>
+
 #include "app/AppContext.h"
 #include "core/Placement.h"
 #include "model/features/PartFeatures.h"
@@ -34,7 +36,7 @@ void drawToolbar(AppContext& ctx)
 {
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 4));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4, 4));
-    Toolbar tb;
+    Toolbar tb(ctx.prefs.toolbarLabels);
     if (ctx.sketchEdit.active()) {
         drawSketchToolbar(ctx, tb);
         ImGui::PopStyleVar(2);
@@ -44,38 +46,47 @@ void drawToolbar(AppContext& ctx)
     for (const auto& t : ctx.doc.registry().types()) {
         if (t.category != "Primitives")
             continue;
-        if (tb.button(t.label.c_str(), ("Create a " + t.label).c_str()))
+        const char* icon = t.type == "Part::Box"        ? ICON_BOX
+                           : t.type == "Part::Cylinder" ? ICON_CYLINDER
+                           : t.type == "Part::Sphere"   ? ICON_SPHERE
+                           : t.type == "Part::Cone"     ? ICON_CONE
+                                                        : ICON_TORUS;
+        if (tb.button(icon, t.label.c_str(), ("Create a " + t.label).c_str()))
             ctx.createFeature(t.type);
     }
     tb.separator();
     drawSketchCreateToolbar(ctx, tb);
     tb.separator();
-    if (tb.button("Union", "Union of the selected objects (U)"))
+    if (tb.button(ICON_UNION, "Union", "Union of the selected objects (U)"))
         ctx.booleanFromSelection(model::BooleanFeature::Union);
-    if (tb.button("Cut", "Subtract the other selected objects from the first one (X)"))
+    if (tb.button(ICON_CUT, "Cut", "Subtract the other selected objects from the first one (X)"))
         ctx.booleanFromSelection(model::BooleanFeature::Cut);
-    if (tb.button("Intersect", "Common volume of the selected objects (N)"))
+    if (tb.button(ICON_INTERSECT, "Intersect", "Common volume of the selected objects (N)"))
         ctx.booleanFromSelection(model::BooleanFeature::Intersect);
     tb.separator();
-    if (tb.button("Fillet", "Round the selected edges (Shift+F)"))
+    if (tb.button(ICON_FILLET, "Fillet", "Round the selected edges (Shift+F)"))
         ctx.dressUpFromSelection("Part::Fillet");
-    if (tb.button("Chamfer", "Bevel the selected edges (Shift+C)"))
+    if (tb.button(ICON_CHAMFER, "Chamfer", "Bevel the selected edges (Shift+C)"))
         ctx.dressUpFromSelection("Part::Chamfer");
     tb.separator();
     tb.text("Select");
-    if (tb.button("Obj", "Select whole objects (1)", ctx.pickFilter == PickFilter::Object))
+    if (tb.button(ICON_SELECT, "Obj", "Select whole objects (1)", ctx.pickFilter == PickFilter::Object))
         ctx.pickFilter = PickFilter::Object;
-    if (tb.button("Face", "Select faces (2)", ctx.pickFilter == PickFilter::Face))
+    if (tb.button(ICON_FACE, "Face", "Select faces (2)", ctx.pickFilter == PickFilter::Face))
         ctx.pickFilter = PickFilter::Face;
-    if (tb.button("Edge", "Select edges (3)", ctx.pickFilter == PickFilter::Edge))
+    if (tb.button(ICON_EDGE, "Edge", "Select edges (3)", ctx.pickFilter == PickFilter::Edge))
         ctx.pickFilter = PickFilter::Edge;
     tb.separator();
-    if (tb.button("Move", "Translate gizmo (W)", ctx.gizmo == GizmoMode::Translate))
+    if (tb.button(ICON_MOVE, "Move", "Translate gizmo (W)", ctx.gizmo == GizmoMode::Translate))
         ctx.gizmo = GizmoMode::Translate;
-    if (tb.button("Rotate", "Rotate gizmo (E)", ctx.gizmo == GizmoMode::Rotate))
+    if (tb.button(ICON_ROTATE, "Rotate", "Rotate gizmo (E)", ctx.gizmo == GizmoMode::Rotate))
         ctx.gizmo = GizmoMode::Rotate;
-    if (tb.button("Off", "Hide gizmo (Q)", ctx.gizmo == GizmoMode::None))
+    if (tb.button(ICON_OFF, "Off", "Hide gizmo (Q)", ctx.gizmo == GizmoMode::None))
         ctx.gizmo = GizmoMode::None;
+    tb.separator();
+    if (tb.button(ICON_MEASURE, "Measure", "Measure the selection: one item, or the distance / angle between two "
+                                           "(Ctrl+click). Key M", ctx.measureMode))
+        ctx.measureMode = !ctx.measureMode;
     tb.separator();
     drawAnalysisToolbar(ctx, tb);
 
@@ -94,6 +105,7 @@ void drawViewOverlay(AppContext& ctx, const ImVec2& origin, const ImVec2& size)
     };
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6, 3));
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.13f, 0.15f, 0.75f));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.92f, 0.93f, 0.95f, 1.0f)); // on the 3D view in any theme
     float x = origin.x + size.x - 8.0f;
     const float y = origin.y + 8.0f;
     auto place = [&](const char* label) {
@@ -117,7 +129,7 @@ void drawViewOverlay(AppContext& ctx, const ImVec2& origin, const ImVec2& size)
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("%s", buttons[i].tip);
     }
-    ImGui::PopStyleColor();
+    ImGui::PopStyleColor(2);
     ImGui::PopStyleVar();
 }
 
@@ -267,7 +279,7 @@ void drawViewport(AppContext& ctx)
 
     // --- camera navigation ---
     if (hovered && io.MouseWheel != 0.0f)
-        ctx.camera.zoom(io.MouseWheel, mx, my);
+        ctx.camera.zoom(io.MouseWheel * ctx.prefs.zoomSpeed * (ctx.prefs.invertZoom ? -1.0f : 1.0f), mx, my);
 
     if (active) {
         for (ImGuiMouseButton b : {ImGuiMouseButton_Left, ImGuiMouseButton_Right, ImGuiMouseButton_Middle}) {
@@ -278,14 +290,17 @@ void drawViewport(AppContext& ctx)
             }
         }
         const ImVec2 d = io.MouseDelta;
-        const bool rightOrMiddle = ImGui::IsMouseDown(ImGuiMouseButton_Right) || ImGui::IsMouseDown(ImGuiMouseButton_Middle);
-        const bool altLeft = io.KeyAlt && ImGui::IsMouseDown(ImGuiMouseButton_Left);
+        const ImGuiMouseButton orbitButton = ImGuiMouseButton(ctx.prefs.orbitButton);
+        const ImGuiMouseButton panButton = ImGuiMouseButton(ctx.prefs.panButton);
+        const bool orbitDown = ImGui::IsMouseDown(orbitButton) || (io.KeyAlt && ImGui::IsMouseDown(ImGuiMouseButton_Left));
+        const bool panDown = ImGui::IsMouseDown(panButton);
         if (ImGui::IsMouseDragging(g_in.pressButton, 3.0f))
             g_in.dragging = true;
-        if ((rightOrMiddle || altLeft) && (d.x != 0 || d.y != 0)) {
-            // Middle = pan (Shift: orbit); Right / Alt+Left = orbit (Shift: pan).
-            const bool middle = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
-            const bool pan = middle ? !io.KeyShift : io.KeyShift;
+        const bool leftDragAllowed =
+            orbitButton != ImGuiMouseButton_Left || (g_in.dragging && (!ctx.sketchEdit.active() || io.KeyAlt));
+        if ((orbitDown || panDown) && leftDragAllowed && (d.x != 0 || d.y != 0)) {
+            // Configurable buttons (Preferences); Shift swaps orbit and pan.
+            const bool pan = panDown ? !io.KeyShift : io.KeyShift;
             if (pan)
                 ctx.camera.pan(d.x * fbScale.x, d.y * fbScale.y);
             else
@@ -366,6 +381,7 @@ void drawViewport(AppContext& ctx)
     drawGizmo(ctx, pos, size);
     drawAxisTriad(ctx, dl, pos, size);
     drawAnalysisOverlay(ctx, dl, pos, size);
+    drawMeasureOverlay(ctx, dl, pos);
     drawViewOverlay(ctx, pos, size);
 
     if (ctx.shapeEdit.active()) {

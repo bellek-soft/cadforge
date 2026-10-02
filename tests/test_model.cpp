@@ -192,3 +192,52 @@ TEST(step_and_stl_export_import)
     std::filesystem::remove(step);
     std::filesystem::remove(stl);
 }
+
+#include "geom/Measure.h"
+
+TEST(measure_entities_and_distance)
+{
+    const auto box = geom::makeBox(10, 20, 30);
+    const geom::EntityMeasure whole = geom::measureEntity({&box, 0, 0});
+    CHECK(whole.valid);
+    CHECK_NEAR(whole.volume, 6000.0, 1e-6);
+    CHECK_NEAR(whole.area, 2 * (200.0 + 300.0 + 600.0), 1e-6);
+    CHECK_NEAR(whole.center.z, 15.0, 1e-9);
+
+    // Opposite faces x = 0 and x = 10: distance 10, parallel normals -> 180 deg.
+    int fx0 = 0, fx10 = 0, fz0 = 0;
+    for (int i = 1; i <= box.faceCount(); ++i) {
+        const auto m = geom::measureEntity({&box, 1, i});
+        if (std::abs(m.center.x) < 1e-9) fx0 = i;
+        if (std::abs(m.center.x - 10) < 1e-9) fx10 = i;
+        if (std::abs(m.center.z) < 1e-9) fz0 = i;
+    }
+    const auto d = geom::measureDistance({&box, 1, fx0}, {&box, 1, fx10});
+    CHECK(d.valid);
+    CHECK_NEAR(d.distance, 10.0, 1e-9);
+    CHECK(d.hasAngle);
+    CHECK_NEAR(d.angleDeg, 180.0, 1e-6);
+    const auto p = geom::measureDistance({&box, 1, fx0}, {&box, 1, fz0});
+    CHECK_NEAR(p.distance, 0.0, 1e-9);
+    CHECK_NEAR(p.angleDeg, 90.0, 1e-6);
+
+    const auto cyl = geom::makeCylinder(5, 10);
+    bool sawCircle = false, sawCylinder = false;
+    for (int i = 1; i <= cyl.edgeCount(); ++i) {
+        const auto m = geom::measureEntity({&cyl, 2, i});
+        if (m.hasRadius) {
+            sawCircle = true;
+            CHECK_NEAR(m.radius, 5.0, 1e-9);
+            CHECK_NEAR(m.length, 2 * kPi * 5.0, 1e-6);
+        }
+    }
+    for (int i = 1; i <= cyl.faceCount(); ++i) {
+        const auto m = geom::measureEntity({&cyl, 1, i});
+        if (std::string(m.typeName) == "Cylinder") {
+            sawCylinder = true;
+            CHECK_NEAR(m.radius, 5.0, 1e-9);
+            CHECK_NEAR(std::abs(m.direction.z), 1.0, 1e-9);
+        }
+    }
+    CHECK(sawCircle && sawCylinder);
+}

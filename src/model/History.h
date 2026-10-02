@@ -35,6 +35,8 @@ public:
     /// True when the current state differs from the last saved state.
     bool isModified() const { return m_index != m_savedIndex; }
     void markSaved() { m_savedIndex = m_index; }
+    /// Forces "modified" (e.g. after restoring an autosave).
+    void markModified() { m_savedIndex = static_cast<std::size_t>(-1); }
 
 private:
     struct State {

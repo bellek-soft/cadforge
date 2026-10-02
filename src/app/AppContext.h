@@ -2,7 +2,9 @@
 // Application state shared by all UI panels plus the high-level editing
 // operations ("commands"). Panels stay thin: they read state and call these.
 
+#include "app/Autosave.h"
 #include "app/FeaController.h"
+#include "app/Preferences.h"
 #include "app/SceneView.h"
 #include "app/SketchEditor.h"
 #include "app/Selection.h"
@@ -59,7 +61,20 @@ public:
     model::RecomputeStats lastRecompute;
     std::string filePath;         // empty = untitled
 
+    // Preferences, autosave / recovery
+    Preferences prefs;
+    bool persistPreferences = true;          // false in screenshot / test runs
+    Autosave autosave;
+    std::vector<Autosave::Recovery> recoveries; // shown in the recovery dialog at startup
+    /// Copies the appearance preferences into the render settings.
+    void applyPreferences();
+    void savePreferences();
+
+    // Measure tool: measurements of the current selection (1 or 2 items)
+    bool measureMode = false;
+
     // UI flags
+    bool showPreferences = false;
     bool showConsole = true;
     bool showImGuiDemo = false;
     bool showAbout = false;
@@ -113,7 +128,7 @@ public:
 
     // --- files ---
     void newDocument();
-    bool openDocument(const std::string& path);
+    bool openDocument(const std::string& path, bool addToRecent = true);
     bool saveDocument(const std::string& path);
     void importStep(const std::string& path);
     void exportStep(const std::string& path);

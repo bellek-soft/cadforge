@@ -41,3 +41,8 @@ add_library(cadforge_spectra INTERFACE)
 target_include_directories(cadforge_spectra SYSTEM INTERFACE spectra/include)
 target_link_libraries(cadforge_spectra INTERFACE Eigen3::Eigen)
 add_library(cadforge::spectra ALIAS cadforge_spectra)
+
+# Lucide icon font subset (ISC), embedded as a byte array.
+add_library(cadforge_lucide STATIC lucide/LucideIcons.cpp)
+target_include_directories(cadforge_lucide PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lucide)
+add_library(cadforge::lucide ALIAS cadforge_lucide)

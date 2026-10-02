@@ -489,7 +489,22 @@ void AppContext::newDocument()
     status("New document");
 }
 
-bool AppContext::openDocument(const std::string& path)
+void AppContext::applyPreferences()
+{
+    settings.backgroundTop = prefs.backgroundTop;
+    settings.backgroundBottom = prefs.backgroundBottom;
+    settings.selectionColor = prefs.selectionColor;
+    settings.hoverColor = prefs.hoverColor;
+    settings.edgeWidth = prefs.edgeWidth;
+}
+
+void AppContext::savePreferences()
+{
+    if (persistPreferences)
+        prefs.save();
+}
+
+bool AppContext::openDocument(const std::string& path, bool addToRecent)
 {
     try {
         sketchEdit.finish(*this);
@@ -501,6 +516,10 @@ bool AppContext::openDocument(const std::string& path)
         history.reset(doc);
         filePath = path;
         fitAll(false);
+        if (addToRecent) {
+            prefs.addRecentFile(path);
+            savePreferences();
+        }
         status("Opened " + path + (lastRecompute.failed ? " (" + std::to_string(lastRecompute.failed) +
                                                               " feature(s) failed)"
                                                         : ""));
@@ -517,6 +536,9 @@ bool AppContext::saveDocument(const std::string& path)
         doc.save(path);
         filePath = path;
         history.markSaved();
+        autosave.clear();
+        prefs.addRecentFile(path);
+        savePreferences();
         status("Saved " + path);
         return true;
     } catch (const std::exception& e) {

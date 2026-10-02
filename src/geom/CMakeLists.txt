@@ -5,6 +5,7 @@ add_library(cadforge_geom STATIC
     Operations.cpp
     Profile.cpp
     Naming.cpp
+    Measure.cpp
     Tessellator.cpp
     ShapeIO.cpp)
 target_link_libraries(cadforge_geom

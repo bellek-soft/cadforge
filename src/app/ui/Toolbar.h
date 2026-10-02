@@ -2,16 +2,32 @@
 
 #include <imgui.h>
 
+#include <string>
+
 namespace cf::app::ui {
 
 /// Horizontal toolbar that wraps onto the next line when the window is narrow.
 class Toolbar {
 public:
-    Toolbar() : m_right(ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x) {}
+    explicit Toolbar(bool labels = true)
+        : m_right(ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x), m_labels(labels)
+    {
+    }
+
+    /// Icon button: "icon label" (or the icon alone when labels are off; the label
+    /// then goes into the tooltip).
+    bool button(const char* icon, const char* label, const char* tooltip, bool active = false)
+    {
+        std::string text = m_labels ? std::string(icon) + " " + label : std::string(icon);
+        text += "##";
+        text += label;
+        std::string tip = m_labels || !tooltip ? (tooltip ? tooltip : "") : std::string(label) + ": " + tooltip;
+        return button(text.c_str(), tip.empty() ? nullptr : tip.c_str(), active);
+    }
 
     bool button(const char* label, const char* tooltip, bool active = false)
     {
-        place(ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f);
+        place(ImGui::CalcTextSize(label, nullptr, true).x + ImGui::GetStyle().FramePadding.x * 2.0f);
         if (active)
             ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
         const bool clicked = ImGui::Button(label);
@@ -40,6 +56,7 @@ private:
         m_first = false;
     }
     float m_right;
+    bool m_labels = true;
     bool m_first = true;
 };
 

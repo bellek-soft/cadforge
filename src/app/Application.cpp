@@ -139,12 +139,20 @@ int Application::run(const AppOptions& opt)
         dpiScale = std::max(1.0f, xs);
     }
 #endif
-    ui::setupStyle(dpiScale);
+    const bool testRun = !opt.screenshotPath.empty();
+    const Preferences prefs = testRun ? Preferences{} : Preferences::load();
+    ui::setupStyle(dpiScale, prefs.theme == Preferences::Theme::Light, prefs.fontSize);
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 410");
 
     // ---- application state ----
     auto ctx = std::make_unique<AppContext>();
+    ctx->prefs = prefs;
+    ctx->persistPreferences = !testRun;
+    ctx->autosave.enabled = !testRun;
+    ctx->applyPreferences();
+    if (!testRun)
+        ctx->recoveries = Autosave::findRecoveries();
     if (!ctx->renderer.init()) {
         log::error("Renderer initialization failed");
         return 1;
@@ -214,6 +222,7 @@ int Application::run(const AppOptions& opt)
             activeFrames = std::max(activeFrames, 2);
 
         ctx->fea.poll(*ctx);
+        ctx->autosave.tick(*ctx, now);
         for (const auto& p : ws.dropped)
             openAny(*ctx, p);
         ws.dropped.clear();
@@ -237,6 +246,8 @@ int Application::run(const AppOptions& opt)
         ui::drawViewport(*ctx);
         ui::drawConsole(*ctx);
         ui::drawDialogs(*ctx, ws.quitRequested);
+        ui::drawPreferences(*ctx);
+        ui::drawMeasureWindow(*ctx);
 
         const std::string title = ctx->windowTitle();
         if (title != lastTitle) {
@@ -260,6 +271,10 @@ int Application::run(const AppOptions& opt)
         }
         glfwSwapBuffers(window);
     }
+
+    // A clean exit leaves no autosave behind (the user chose to save or discard).
+    ctx->autosave.clear();
+    ctx->savePreferences();
 
     // GL resources must be released while the context is alive.
     ctx.reset();
