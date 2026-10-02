@@ -48,6 +48,7 @@
  * const std::string &     _matSuffix = "" )*/
 #endif
 
+#include <cassert>
 #include <algorithm>
 #include <future>
 #include <iostream>

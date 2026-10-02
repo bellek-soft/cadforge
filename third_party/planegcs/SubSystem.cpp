@@ -26,6 +26,7 @@
 # pragma warning(disable : 4251)
 #endif
 
+#include <cassert>
 #include <iostream>
 #include <iterator>
 

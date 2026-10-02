@@ -10,5 +10,5 @@
     Boost.Graph replaced by `CompatGraph.h` (union-find connected components)
   * `#include <cmath>` added to `Geo.h` (was pulled in through Boost)
   * C++20 instead of C++23: `std::unreachable()` -> `CADFORGE_UNREACHABLE()` (defined in `SketcherGlobal.h`),
-    `#include <cassert>` added to `Constraints.cpp`
+    `#include <cassert>` added to `Constraints.cpp`, `GCS.cpp` and `SubSystem.cpp` (libc++ does not pull it in)
   * `compat/` provides empty/no-op shims for `FCConfig.h`, `Base/Console.h`, `Base/Tools.h`

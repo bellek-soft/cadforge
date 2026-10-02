@@ -7,6 +7,7 @@
 #ifndef SPECTRA_ORTHOGONALIZATION_H
 #define SPECTRA_ORTHOGONALIZATION_H
 
+#include <cassert>
 #include <Eigen/Core>
 #include <Eigen/QR>
 
