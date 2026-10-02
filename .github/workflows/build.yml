@@ -1,0 +1,173 @@
+# Builds and tests CadForge on Linux, Windows and macOS.
+# Pushing a tag "v*" (e.g. v0.5.0) additionally publishes the packages as a GitHub Release.
+#
+# Dependencies come from vcpkg (manifest mode, pinned by builtin-baseline in vcpkg.json).
+# The first run builds OpenCASCADE and Netgen from source (about 30-90 min per platform);
+# the binaries are cached with actions/cache, so later runs only build CadForge itself.
+
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-22.04
+            triplet: x64-linux
+            package: CadForge-linux-x64
+          - name: Windows x64
+            os: windows-2022
+            triplet: x64-windows
+            package: CadForge-windows-x64
+          - name: macOS arm64
+            os: macos-14
+            triplet: arm64-osx
+            package: CadForge-macos-arm64
+    env:
+      VCPKG_DEFAULT_TRIPLET: ${{ matrix.triplet }}
+      VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/vcpkg-cache,readwrite"
+      VCPKG_DISABLE_METRICS: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system packages (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential ninja-build pkg-config autoconf automake libtool \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
+            libgl1-mesa-dev libglu1-mesa-dev libxkbcommon-dev libwayland-dev wayland-protocols \
+            libltdl-dev
+
+      - name: Install build tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja pkg-config autoconf automake libtool || true
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache/restore@v4
+        with:
+          path: vcpkg-cache
+          key: vcpkg-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}
+          restore-keys: |
+            vcpkg-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}-
+            vcpkg-${{ matrix.triplet }}-
+
+      - name: Bootstrap vcpkg
+        shell: bash
+        run: |
+          mkdir -p vcpkg-cache
+          # Full clone: the builtin-baseline commit of vcpkg.json must be reachable.
+          git clone https://github.com/microsoft/vcpkg external/vcpkg
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            ./external/vcpkg/bootstrap-vcpkg.bat -disableMetrics
+          else
+            ./external/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          fi
+
+      - name: Configure (builds the dependencies on a cold cache)
+        shell: bash
+        run: cmake --preset release
+
+      - name: Save vcpkg binary cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: vcpkg-cache
+          key: vcpkg-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}
+
+      - name: Show vcpkg logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          find external/vcpkg/buildtrees -name "*-err.log" -o -name "config-*-out.log" 2>/dev/null | head -20 | while read f; do
+            echo "::group::$f"; tail -n 80 "$f"; echo "::endgroup::"; done
+
+      - name: Build
+        shell: bash
+        run: cmake --build --preset release --parallel
+
+      - name: Test
+        shell: bash
+        run: ctest --preset release
+
+      - name: Package
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          PKG="${{ matrix.package }}"
+          mkdir -p dist
+          case "$RUNNER_OS" in
+            Linux)
+              mkdir -p "dist/$PKG"
+              cp build/release/src/app/CadForge "dist/$PKG/"
+              strip "dist/$PKG/CadForge" || true
+              cp README.md "dist/$PKG/"
+              tar -C dist -czf "dist/$PKG.tar.gz" "$PKG"
+              ;;
+            macOS)
+              APP=build/release/src/app/CadForge.app
+              # Ad-hoc signature (no Apple developer certificate): Gatekeeper asks once,
+              # open with right click > Open the first time.
+              codesign --force --deep --sign - "$APP"
+              ditto -c -k --keepParent "$APP" "dist/$PKG.zip"
+              ;;
+            Windows)
+              mkdir -p "dist/$PKG"
+              # vcpkg copies the dependency DLLs next to the executable.
+              cp build/release/src/app/Release/*.exe build/release/src/app/Release/*.dll "dist/$PKG/" 2>/dev/null || true
+              cp README.md "dist/$PKG/"
+              (cd dist && 7z a -tzip "$PKG.zip" "$PKG" > /dev/null)
+              ;;
+          esac
+          ls -la dist
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.package }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la dist
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "CadForge ${GITHUB_REF_NAME}" \
+            --generate-notes

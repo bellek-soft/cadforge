@@ -1,5 +1,7 @@
 # CadForge
 
+[![Build](https://github.com/bellek-soft/cadforge/actions/workflows/build.yml/badge.svg)](https://github.com/bellek-soft/cadforge/actions/workflows/build.yml)
+
 A parametric 3D CAD desktop application in modern C++20.
 
 * **Geometry kernel:** OpenCASCADE (B-Rep): primitives, booleans (CSG), fillet, chamfer, STEP/STL
@@ -35,6 +37,15 @@ A parametric 3D CAD desktop application in modern C++20.
 | Comfort | Recent files, autosave every N minutes with crash recovery, Lucide toolbar icons (or icons only), preferences window (mouse buttons, zoom, dark / light theme, colors, font size, decimals, autosave) |
 | Analysis | Static study per solid, material library (or custom E, ν, ρ, yield), fixed supports (per axis), forces, pressures, gravity; Tet4/Tet10 mesh with adjustable size; background meshing/solving with progress; contour plots of von Mises / displacement with deformed shape, legend, safety factor and reaction check |
 | Analysis+ | Modal analysis (natural frequencies, mode shapes, effective mass) with Spectra; local mesh refinement on selected faces; section view through the mesh (X/Y/Z plane, flip); probe tool (hover / click to pin values); VTK export (.vtu) of mesh, displacements, stresses and mode shapes for ParaView |
+
+## Downloads
+
+Prebuilt packages for Windows (x64), Linux (x64) and macOS (Apple Silicon) are attached to every
+[release](https://github.com/bellek-soft/cadforge/releases). The macOS app is not notarized: open it the first time
+with right click > Open. On Linux, unpack the archive and run `./CadForge` (needs OpenGL 4.1 and X11 / XWayland).
+
+Releases are built by GitHub Actions (`.github/workflows/build.yml`) when a version tag is pushed:
+`git tag v0.5.0 && git push origin v0.5.0`.
 
 ## Building
 
@@ -159,7 +170,11 @@ docs         architecture notes and roadmap (CSG, FEA)
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and how to extend it.
 
-## License notes
+## License
+
+CadForge is released under the MIT License (see `LICENSE`).
+
+### Third-party licenses
 
 OpenCASCADE is LGPL-2.1 with an exception, Netgen is LGPL-2.1, PlaneGCS (from FreeCAD, vendored in
 `third_party/planegcs` with its license) is LGPL-2.1+, Eigen and Spectra (vendored, header-only) are MPL-2.0, AMGCL is MIT, the
