@@ -1,4 +1,4 @@
-add_executable(cadforge_tests test_model.cpp)
-target_link_libraries(cadforge_tests PRIVATE cadforge::model)
+add_executable(cadforge_tests test_main.cpp test_model.cpp test_fea.cpp)
+target_link_libraries(cadforge_tests PRIVATE cadforge::model cadforge::fea)
 cadforge_set_warnings(cadforge_tests)
 add_test(NAME cadforge_tests COMMAND cadforge_tests)

@@ -14,9 +14,11 @@
             | features/PartFeatures               |   | GpuMesh Shaders |
             +---------------------------+---------+   +--------+--------+
                                         |                      |
-            +---------------------------v---------+            |
+            +-------------+-------------v---------+            |
   geom      | Shape (opaque)  Primitives  Ops     |            |
             | Tessellator  ShapeIO   [OCCT here]  |            |
+            +---------------------------+---------+            |
+  fea       | Mesher [Netgen]  Solver [Eigen, AMGCL]  Post     |  (core only)
             +---------------------------+---------+            |
                                         |                      |
             +---------------------------v----------------------v--------+
@@ -104,19 +106,41 @@ get defaults, so the format can evolve. Bump `formatVersion` for breaking change
   isolated in `EdgeFeature`.
 * Asynchronous recompute (worker thread + cancellation) for heavy models.
 
-### FEA
+### FEA (implemented in v0.2 — linear static)
 
-Planned as a new `src/analysis` layer between `geom` and `model`:
+```
+ model (data)                         app (runtime)                     fea (engine, core only)
+ ---------------------------------    -------------------------------   -------------------------------
+ StaticAnalysisFeature  target,       FeaController                     generateVolumeMesh(MeshData)
+   material, mesh size/order,   --->    builds StaticSetup + surface --->   weld -> Netgen STL -> tets
+   gravity                              runs mesh/solve on a thread          classify boundary tris
+ FixedSupport / Force / Pressure        keeps results in memory              to CAD faces
+   (nested under the analysis,          keyed by content hashes         solveStatic(VolumeMesh, setup)
+    faces = CAD face indices)           -> "outdated" detection           Tet4/Tet10, D, loads,
+ buildStaticSetup(doc, analysis)      SceneView shows mesh / contours     direct LDL^T or AMG+CG
+                                      AnalysisUi: panel, glyphs, legend  resultSurface(): MeshData
+```
 
-1. **Meshing:** tetrahedral volume mesh from a `geom::Shape`. Candidates: Netgen (LGPL, works directly on
-   OCCT shapes), Gmsh (GPL - license impact), TetGen (AGPL - license impact). Recommendation: Netgen.
-2. **Solver:** linear static elasticity with 4/10-node tetrahedra, sparse assembly with Eigen (MPL-2.0,
-   available in vcpkg), CG/Cholesky solvers; later modal analysis.
-3. **Model:** `AnalysisFeature` (references a solid), `Material`, boundary conditions (fixed faces, forces,
-   pressure) referencing face indices - the same topological-naming mechanism as fillets.
-4. **Results:** displacement / von Mises stress per node -> `MeshData::scalars` -> colormap rendering
-   (already implemented in the shader), deformed-shape scaling, legend.
-5. Long computations run in a background thread with progress reporting in the UI.
+* **Meshing:** the solid is tessellated finely, welded into a watertight surface and given to Netgen as
+  STL geometry; every CAD face boundary is passed as a feature edge, so each boundary triangle of the
+  tetrahedral mesh lies on exactly one CAD face. Triangles are mapped back to their CAD face (nearest
+  original triangle), which is how supports and loads defined on faces reach the mesh. Element
+  connectivity is canonicalized (positive tets, outward boundary triangles, Abaqus-style Tet10 order).
+* **Solver:** isotropic linear elasticity, Tet4 (1-point) and Tet10 (4-point Gauss) elements, consistent
+  surface and body loads. Only the lower triangle of the free-DOF stiffness matrix is stored. Small systems
+  use Eigen's sparse LDL^T; larger ones CG preconditioned by AMGCL smoothed-aggregation AMG with the six
+  rigid body modes as near-null space (≈20-30 iterations independent of size). A rank check of the rigid
+  body modes on the fixed DOFs rejects under-constrained models before solving.
+* **Post-processing:** nodal stresses are averaged from element nodes; von Mises, displacement magnitude and
+  components are shown as contours on the (optionally deformed) boundary surface; reactions are computed from
+  the internal forces and shown next to the applied load as an equilibrium check.
+* **Validation (unit tests):** uniform tension (exact for Tet4/Tet10), Tet10 cantilever vs. beam theory
+  (0.1903 vs 0.1905 mm), gravity + pressure equilibrium, under-constrained detection for both solver paths.
 
-Open design question for FEA: whether analysis results live in the document (saved in the project) or
-in a separate results file next to it.
+Next steps for FEA:
+
+* Results export (VTK / CSV), clipping plane and probe tool.
+* Remote / bonded contacts between bodies, assemblies.
+* Modal analysis (eigenfrequencies) re-using the assembly code (needs a sparse eigen solver, e.g. Spectra).
+* Local mesh refinement on selected faces; mesh quality report.
+* Multithreaded assembly and stress recovery.

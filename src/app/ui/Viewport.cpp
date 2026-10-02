@@ -1,4 +1,5 @@
 #include "app/ui/Ui.h"
+#include "app/ui/Toolbar.h"
 
 #include "app/AppContext.h"
 #include "core/Placement.h"
@@ -27,45 +28,6 @@ struct ViewportInput {
     bool gizmoShown = false;
 };
 ViewportInput g_in;
-
-/// Horizontal toolbar that wraps onto the next line when the window is narrow.
-class Toolbar {
-public:
-    Toolbar() : m_right(ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x) {}
-
-    bool button(const char* label, const char* tooltip, bool active = false)
-    {
-        place(ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f);
-        if (active)
-            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
-        const bool clicked = ImGui::Button(label);
-        if (active)
-            ImGui::PopStyleColor();
-        if (tooltip && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-            ImGui::SetTooltip("%s", tooltip);
-        return clicked;
-    }
-    void text(const char* t)
-    {
-        place(ImGui::CalcTextSize(t).x);
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextDisabled("%s", t);
-    }
-    void separator() { text("|"); }
-
-private:
-    void place(float width)
-    {
-        if (!m_first) {
-            const float next = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x + width;
-            if (next <= m_right)
-                ImGui::SameLine();
-        }
-        m_first = false;
-    }
-    float m_right;
-    bool m_first = true;
-};
 
 void drawToolbar(AppContext& ctx)
 {
@@ -106,6 +68,8 @@ void drawToolbar(AppContext& ctx)
         ctx.gizmo = GizmoMode::Rotate;
     if (tb.button("Off", "Hide gizmo (Q)", ctx.gizmo == GizmoMode::None))
         ctx.gizmo = GizmoMode::None;
+    tb.separator();
+    drawAnalysisToolbar(ctx, tb);
 
     ImGui::PopStyleVar(2);
 }
@@ -180,10 +144,10 @@ void drawAxisTriad(AppContext& ctx, ImDrawList* dl, const ImVec2& origin, const 
 void drawGizmo(AppContext& ctx, const ImVec2& origin, const ImVec2& size)
 {
     const auto feats = ctx.selection.features();
-    const bool usable = ctx.gizmo != GizmoMode::None && feats.size() == 1 && !ctx.edgeEdit.active() &&
+    const bool usable = ctx.gizmo != GizmoMode::None && feats.size() == 1 && !ctx.shapeEdit.active() &&
                         ctx.pickFilter == PickFilter::Object;
     model::Feature* f = usable ? ctx.doc.find(feats[0]) : nullptr;
-    g_in.gizmoShown = f && f->visible();
+    g_in.gizmoShown = f && f->visible() && f->producesGeometry();
     if (!g_in.gizmoShown) {
         g_in.gizmoWasUsing = false;
         return;
@@ -232,12 +196,15 @@ void handlePick(AppContext& ctx, const render::PickResult& hit, bool additive)
             ctx.selection.clear();
         return;
     }
-    if (ctx.edgeEdit.active() && fid != ctx.edgeEdit.base)
+    if (ctx.shapeEdit.active() && fid != ctx.shapeEdit.base)
         return; // only edges of the base can be picked while editing
     SelItem item{fid};
-    if (ctx.pickFilter != PickFilter::Object)
+    if (ctx.pickFilter != PickFilter::Object) {
+        if (hit.index <= 0)
+            return; // e.g. analysis mesh wireframe: not a CAD sub-shape
         item = {fid, hit.kind, hit.index};
-    if (additive || ctx.edgeEdit.active())
+    }
+    if (additive || ctx.shapeEdit.active())
         ctx.selection.toggle(item);
     else
         ctx.selection.set(item);
@@ -331,7 +298,7 @@ void drawViewport(AppContext& ctx)
         ctx.hover = ctx.renderer.pick(ctx.camera, items, ctx.pickFilter, int(mx), int(my), radius,
                                       ctx.settings.edgeWidth * fbScale.x);
         ctx.hoverFeature = ctx.scene.featureForPickId(ctx.hover.pickId);
-        if (ctx.edgeEdit.active() && ctx.hoverFeature != ctx.edgeEdit.base)
+        if (ctx.shapeEdit.active() && ctx.hoverFeature != ctx.shapeEdit.base)
             ctx.hover = {}, ctx.hoverFeature = kNoFeature;
         ctx.scene.build(ctx); // refresh hover highlight
     }
@@ -373,10 +340,13 @@ void drawViewport(AppContext& ctx)
     // --- overlays ---
     drawGizmo(ctx, pos, size);
     drawAxisTriad(ctx, dl, pos, size);
+    drawAnalysisOverlay(ctx, dl, pos, size);
     drawViewOverlay(ctx, pos, size);
 
-    if (ctx.edgeEdit.active()) {
-        const char* msg = "Edge edit: click edges, Enter = apply, Esc = cancel";
+    if (ctx.shapeEdit.active()) {
+        const char* msg = ctx.shapeEdit.kind == PickKind::Face
+                              ? "Face edit: click faces, Enter = apply, Esc = cancel"
+                              : "Edge edit: click edges, Enter = apply, Esc = cancel";
         const ImVec2 ts = ImGui::CalcTextSize(msg);
         const ImVec2 p(pos.x + (size.x - ts.x) * 0.5f, pos.y + 12.0f);
         dl->AddRectFilled(ImVec2(p.x - 10, p.y - 5), ImVec2(p.x + ts.x + 10, p.y + ts.y + 5),

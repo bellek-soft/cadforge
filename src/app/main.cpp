@@ -8,7 +8,7 @@
 namespace {
 void usage()
 {
-    std::printf("Usage: CadForge [file.cfp | file.step] [--demo] [--size WxH]\n"
+    std::printf("Usage: CadForge [file.cfp | file.step] [--demo | --fea-demo] [--size WxH]\n"
                 "                [--screenshot out.ppm [--frames N]]\n");
 }
 } // namespace
@@ -20,6 +20,8 @@ int main(int argc, char** argv)
         const std::string a = argv[i];
         if (a == "--demo") {
             opt.demo = true;
+        } else if (a == "--fea-demo") {
+            opt.feaDemo = true;
         } else if (a == "--screenshot" && i + 1 < argc) {
             opt.screenshotPath = argv[++i];
         } else if (a == "--frames" && i + 1 < argc) {

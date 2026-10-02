@@ -1,6 +1,7 @@
 #include "app/ui/Ui.h"
 
 #include "app/AppContext.h"
+#include "model/features/FeaFeatures.h"
 #include "model/features/PartFeatures.h"
 
 #include <algorithm>
@@ -83,7 +84,7 @@ bool featureCombo(AppContext& ctx, const Feature& owner, const char* id, Feature
 EditResult editProperty(AppContext& ctx, Feature& f, Property& p)
 {
     EditResult r;
-    std::string fmt = "%.3f";
+    std::string fmt = p.format.empty() ? "%.3f" : p.format;
     if (!p.unit.empty())
         fmt += " " + p.unit;
 
@@ -193,7 +194,7 @@ EditResult editProperty(AppContext& ctx, Feature& f, Property& p)
         ImGui::Text("%d selected", int(list.size()));
         ImGui::SameLine();
         if (ImGui::SmallButton("Edit..."))
-            ctx.beginEdgeEdit(f.id());
+            ctx.beginSubShapeEdit(f.id());
         break;
     }
     }
@@ -275,12 +276,17 @@ void drawFeatureEditor(AppContext& ctx, Feature& f)
         if (ImGui::IsItemDeactivatedAfterEdit())
             ctx.commit("Change color");
 
-        label("Visible", "");
-        bool vis = f.visible();
-        if (ImGui::Checkbox("##visible", &vis))
-            ctx.setVisible(f.id(), vis);
+        if (f.producesGeometry()) {
+            label("Visible", "");
+            bool vis = f.visible();
+            if (ImGui::Checkbox("##visible", &vis))
+                ctx.setVisible(f.id(), vis);
+        }
         ImGui::EndTable();
     }
+
+    if (f.type() == model::StaticAnalysisFeature::kType)
+        drawAnalysisPanel(ctx, f);
 
     // Group properties by their declared group, preserving declaration order.
     std::vector<std::string> groups;
@@ -302,6 +308,8 @@ void drawFeatureEditor(AppContext& ctx, Feature& f)
                 if (p.hidden || p.group != g)
                     continue;
                 EditResult r = editProperty(ctx, f, p);
+                if (r.changed)
+                    f.onPropertyEdited(p.key); // e.g. material presets
                 changed |= r.changed;
                 if (r.finished)
                     finishedLabel = "Edit " + f.name() + "." + p.label;
@@ -314,26 +322,29 @@ void drawFeatureEditor(AppContext& ctx, Feature& f)
     else if (changed)
         ctx.recompute(); // live preview while dragging
 
-    drawMeasurements(f);
+    if (f.producesGeometry())
+        drawMeasurements(f);
 }
 
-void drawEdgeEditPanel(AppContext& ctx)
+void drawSubShapeEditPanel(AppContext& ctx)
 {
-    const Feature* f = ctx.doc.find(ctx.edgeEdit.feature);
-    const Feature* base = ctx.doc.find(ctx.edgeEdit.base);
+    const Feature* f = ctx.doc.find(ctx.shapeEdit.feature);
+    const Feature* base = ctx.doc.find(ctx.shapeEdit.base);
     if (!f || !base)
         return;
-    ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "Editing edges of %s", f->name().c_str());
-    ImGui::TextWrapped("Click edges of '%s' in the viewport. Ctrl/Shift+click adds or removes edges.",
-                       base->name().c_str());
+    const bool faces = ctx.shapeEdit.kind == render::PickKind::Face;
+    const char* what = faces ? "faces" : "edges";
+    ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "Editing %s of %s", what, f->name().c_str());
+    ImGui::TextWrapped("Click %s of '%s' in the viewport. Ctrl/Shift+click adds or removes %s.", what,
+                       base->name().c_str(), what);
     ImGui::Separator();
-    const auto edges = ctx.selection.subShapes(ctx.edgeEdit.base, render::PickKind::Edge);
-    ImGui::Text("%d edge(s) selected", int(edges.size()));
+    const auto items = ctx.selection.subShapes(ctx.shapeEdit.base, ctx.shapeEdit.kind);
+    ImGui::Text("%d %s selected", int(items.size()), what);
     if (ImGui::Button("Apply (Enter)"))
-        ctx.applyEdgeEdit();
+        ctx.applySubShapeEdit();
     ImGui::SameLine();
     if (ImGui::Button("Cancel (Esc)"))
-        ctx.cancelEdgeEdit();
+        ctx.cancelSubShapeEdit();
 }
 
 void drawMultiSelection(AppContext& ctx, const std::vector<FeatureId>& feats)
@@ -376,8 +387,8 @@ void drawProperties(AppContext& ctx)
         ImGui::End();
         return;
     }
-    if (ctx.edgeEdit.active()) {
-        drawEdgeEditPanel(ctx);
+    if (ctx.shapeEdit.active()) {
+        drawSubShapeEditPanel(ctx);
         ImGui::End();
         return;
     }

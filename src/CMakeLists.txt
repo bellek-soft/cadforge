@@ -6,10 +6,11 @@
 #   render  - OpenGL 4.1 core renderer. Knows meshes, not features.
 #   app     - GLFW + Dear ImGui desktop application.
 #
-# Future modules plug in at the same level:
-#   analysis (FEA) - depends on geom (meshing) + model (analysis features).
+#   fea     - finite element engine (Netgen mesher, Eigen solver). Depends on core only;
+#             model holds the analysis *features*, app runs the jobs.
 add_subdirectory(core)
 add_subdirectory(geom)
+add_subdirectory(fea)
 add_subdirectory(model)
 add_subdirectory(render)
 add_subdirectory(app)

@@ -24,6 +24,10 @@ const char* typeTag(const Feature& f)
     if (t == "Part::Fillet") return "F";
     if (t == "Part::Chamfer") return "C";
     if (t == "Part::ImportStep") return "S";
+    if (t == "FEA::StaticAnalysis") return "A";
+    if (t == "FEA::FixedSupport") return "|";
+    if (t == "FEA::Force") return ">";
+    if (t == "FEA::Pressure") return "P";
     return "#";
 }
 
@@ -31,7 +35,9 @@ void drawNode(AppContext& ctx, const Feature& f, std::unordered_set<FeatureId>& 
 {
     const bool isSelected = ctx.selection.isFeatureSelected(f.id()) ||
                             (ctx.selection.features().size() == 1 && ctx.selection.features()[0] == f.id());
-    const auto inputs = f.consumesInputs() ? f.inputs() : std::vector<FeatureId>{};
+    auto inputs = f.consumesInputs() ? f.inputs() : std::vector<FeatureId>{};
+    for (FeatureId c : ctx.doc.nestedChildren(f.id()))
+        inputs.push_back(c);
 
     ImGui::TableNextRow();
     ImGui::TableSetColumnIndex(0);
@@ -57,8 +63,8 @@ void drawNode(AppContext& ctx, const Feature& f, std::unordered_set<FeatureId>& 
             ctx.selection.toggle(item);
         else
             ctx.selection.set(item);
-        if (ctx.edgeEdit.active())
-            ctx.cancelEdgeEdit();
+        if (ctx.shapeEdit.active())
+            ctx.cancelSubShapeEdit();
     }
     if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && inputs.empty())
         ctx.fitSelection();
@@ -90,13 +96,15 @@ void drawNode(AppContext& ctx, const Feature& f, std::unordered_set<FeatureId>& 
 
     // Visibility toggle column.
     ImGui::TableSetColumnIndex(1);
-    bool visible = f.visible();
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2, 2));
-    if (ImGui::Checkbox("##vis", &visible))
-        ctx.setVisible(f.id(), visible);
-    ImGui::PopStyleVar();
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip(visible ? "Hide" : "Show");
+    if (f.producesGeometry()) {
+        bool visible = f.visible();
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2, 2));
+        if (ImGui::Checkbox("##vis", &visible))
+            ctx.setVisible(f.id(), visible);
+        ImGui::PopStyleVar();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(visible ? "Hide" : "Show");
+    }
 
     if (open && !inputs.empty()) {
         for (FeatureId in : inputs) {

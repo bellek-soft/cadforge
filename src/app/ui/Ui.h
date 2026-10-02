@@ -6,6 +6,9 @@
 namespace cf::app {
 class AppContext;
 }
+namespace cf::model {
+class Feature;
+}
 
 namespace cf::app::ui {
 
@@ -24,6 +27,15 @@ void drawViewport(AppContext& ctx);
 void drawConsole(AppContext& ctx);
 void drawDialogs(AppContext& ctx, bool& quitRequested);
 void handleShortcuts(AppContext& ctx, bool& quitRequested);
+
+// Analysis (FEA) UI, see AnalysisUi.cpp
+void drawAnalysisMenu(AppContext& ctx);
+class Toolbar;
+void drawAnalysisToolbar(AppContext& ctx, Toolbar& tb);
+/// Study controls shown in the property panel of a static analysis.
+void drawAnalysisPanel(AppContext& ctx, model::Feature& analysis);
+/// Viewport overlays: support/load glyphs, result legend, job progress.
+void drawAnalysisOverlay(AppContext& ctx, ImDrawList* dl, const ImVec2& origin, const ImVec2& size);
 
 // Window names (also used by the default layout).
 inline constexpr const char* kModelWindow = "Model";

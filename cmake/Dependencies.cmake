@@ -13,6 +13,8 @@
 #   nlohmann_json::nlohmann_json
 #   imgui::imgui         Dear ImGui incl. GLFW + OpenGL3 backends, docking
 #   imguizmo::imguizmo   3D transform gizmo
+#   Eigen3::Eigen        linear algebra (FEA solver)
+#   cadforge::netgen     Netgen nglib tetrahedral mesher (FEA)
 # -----------------------------------------------------------------------------
 include(FetchContent)
 set(FETCHCONTENT_QUIET ON)
@@ -121,5 +123,34 @@ if(NOT TARGET imguizmo::imguizmo)
     target_link_libraries(cadforge_imguizmo PUBLIC imgui::imgui)
     add_library(imguizmo::imguizmo ALIAS cadforge_imguizmo)
 endif()
+
+# ---- Eigen (FEA solver) ------------------------------------------------------
+find_package(Eigen3 CONFIG QUIET)
+if(NOT TARGET Eigen3::Eigen)
+    if(NOT CADFORGE_FETCH_MISSING)
+        message(FATAL_ERROR "Eigen3 not found")
+    endif()
+    message(STATUS "CadForge: fetching Eigen")
+    FetchContent_Declare(eigen GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git GIT_TAG 3.4.0 GIT_SHALLOW TRUE
+        SOURCE_SUBDIR _cadforge_no_cmake)
+    FetchContent_MakeAvailable(eigen)
+    add_library(cadforge_eigen INTERFACE)
+    target_include_directories(cadforge_eigen SYSTEM INTERFACE ${eigen_SOURCE_DIR})
+    add_library(Eigen3::Eigen ALIAS cadforge_eigen)
+endif()
+
+# ---- Netgen / nglib (FEA mesher) ----------------------------------------------
+# Netgen is big; it is never fetched automatically. Use vcpkg (default) or point
+# Netgen_DIR at an existing installation (.../lib/cmake/netgen or share/netgen).
+find_package(Netgen CONFIG REQUIRED)
+message(STATUS "CadForge: Netgen ${NETGEN_VERSION} (${Netgen_DIR})")
+# Netgen's exported targets reference an (OCC-only) helper target; provide an empty one.
+if(NOT TARGET occ_libs)
+    add_library(occ_libs INTERFACE IMPORTED)
+endif()
+add_library(cadforge_netgen INTERFACE)
+add_library(cadforge::netgen ALIAS cadforge_netgen)
+target_link_libraries(cadforge_netgen INTERFACE nglib)
+target_include_directories(cadforge_netgen SYSTEM INTERFACE ${NETGEN_INCLUDE_DIRS})
 
 find_package(OpenGL REQUIRED)

@@ -167,9 +167,11 @@ int Application::run(const AppOptions& opt)
 
     if (opt.demo)
         cmd::loadDemo(*ctx);
+    if (opt.feaDemo)
+        cmd::loadAnalysisDemo(*ctx);
     if (!opt.openPath.empty())
         openAny(*ctx, opt.openPath);
-    if (!opt.demo && opt.openPath.empty())
+    if (!opt.demo && !opt.feaDemo && opt.openPath.empty())
         ctx->status("Welcome to CadForge. Create a primitive or open File > Load Demo Scene.");
 
     // ---- main loop ----
@@ -181,7 +183,8 @@ int Application::run(const AppOptions& opt)
 
     while (!ctx->quitConfirmed) {
         // Event-driven redraw: sleep while idle, render continuously while interacting.
-        const bool busy = ImGui::IsAnyMouseDown() || ctx->camera.update(0.0) || !opt.screenshotPath.empty();
+        const bool busy = ImGui::IsAnyMouseDown() || ctx->camera.update(0.0) || !opt.screenshotPath.empty() ||
+                          ctx->fea.busy();
         if (busy || activeFrames > 0) {
             glfwPollEvents();
             --activeFrames;
@@ -202,6 +205,7 @@ int Application::run(const AppOptions& opt)
         if (ctx->camera.update(dt))
             activeFrames = std::max(activeFrames, 2);
 
+        ctx->fea.poll(*ctx);
         for (const auto& p : ws.dropped)
             openAny(*ctx, p);
         ws.dropped.clear();

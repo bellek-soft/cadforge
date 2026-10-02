@@ -10,6 +10,8 @@
 #include "model/History.h"
 #include "model/features/PartFeatures.h"
 
+#include "TestHarness.h"
+
 #include <nlohmann/json.hpp>
 
 #include <cmath>
@@ -22,35 +24,6 @@
 using namespace cf;
 
 namespace {
-struct TestCase {
-    const char* name;
-    std::function<void()> fn;
-};
-std::vector<TestCase>& registry()
-{
-    static std::vector<TestCase> r;
-    return r;
-}
-struct Registrar {
-    Registrar(const char* n, std::function<void()> f) { registry().push_back({n, std::move(f)}); }
-};
-int g_failures = 0;
-
-#define TEST(name)                                     \
-    static void name();                                \
-    static Registrar reg_##name(#name, name);          \
-    static void name()
-
-#define CHECK(cond)                                                                 \
-    do {                                                                            \
-        if (!(cond)) {                                                              \
-            std::printf("    FAILED %s:%d: %s\n", __FILE__, __LINE__, #cond);       \
-            ++g_failures;                                                           \
-        }                                                                           \
-    } while (0)
-
-#define CHECK_NEAR(a, b, tol) CHECK(std::abs((a) - (b)) <= (tol))
-
 constexpr double kPi = 3.14159265358979323846;
 
 model::Feature* box(model::Document& doc, double l, double w, double h)
@@ -218,21 +191,4 @@ TEST(step_and_stl_export_import)
     CHECK(std::filesystem::file_size(stl) > 84);
     std::filesystem::remove(step);
     std::filesystem::remove(stl);
-}
-
-int main()
-{
-    for (auto& t : registry()) {
-        const int before = g_failures;
-        std::printf("[ RUN  ] %s\n", t.name);
-        try {
-            t.fn();
-        } catch (const std::exception& e) {
-            std::printf("    EXCEPTION: %s\n", e.what());
-            ++g_failures;
-        }
-        std::printf("[ %s ] %s\n", g_failures == before ? " OK " : "FAIL", t.name);
-    }
-    std::printf("\n%zu tests, %d failed checks\n", registry().size(), g_failures);
-    return g_failures == 0 ? 0 : 1;
 }

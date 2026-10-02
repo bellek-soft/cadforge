@@ -7,6 +7,7 @@ namespace cf::app {
 struct AppOptions {
     std::string openPath;        // project (.cfp) or STEP file to open at startup
     bool demo = false;           // load the demo scene
+    bool feaDemo = false;        // load (and solve) the analysis demo
     std::string screenshotPath;  // render N frames, save a PPM screenshot, exit (CI / docs)
     int screenshotFrames = 30;
     int width = 0, height = 0;   // 0 = choose from the monitor size

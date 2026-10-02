@@ -46,6 +46,8 @@ struct Property {
     std::vector<std::string> enumItems;
     std::string tooltip;
     bool hidden = false;             // not shown in the generic editor
+    std::string subShape;            // IndexList only: "face" or "edge"
+    std::string format;              // printf format for numbers in the UI (default "%.3f")
 };
 
 class PropertySet {
@@ -84,6 +86,6 @@ Property makeString(std::string key, std::string label, std::string value, std::
 Property makeFilePath(std::string key, std::string label, std::string value, std::string group = "Parameters");
 Property makeRef(std::string key, std::string label, std::string group = "Inputs");
 Property makeRefList(std::string key, std::string label, std::string group = "Inputs");
-Property makeIndexList(std::string key, std::string label, std::string group = "Parameters");
+Property makeIndexList(std::string key, std::string label, std::string subShape, std::string group = "Parameters");
 
 } // namespace cf::model

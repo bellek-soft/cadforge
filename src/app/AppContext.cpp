@@ -3,6 +3,7 @@
 #include "core/Log.h"
 #include "core/Paths.h"
 #include "geom/ShapeIO.h"
+#include "model/features/FeaFeatures.h"
 #include "model/features/PartFeatures.h"
 
 #include <algorithm>
@@ -47,6 +48,7 @@ void AppContext::recompute()
 {
     lastRecompute = doc.recompute();
     pruneSelection();
+    fea.prune(doc);
 }
 
 void AppContext::commit(const std::string& label)
@@ -60,7 +62,7 @@ void AppContext::undo()
     if (!history.canUndo())
         return;
     const std::string label = history.undoLabel();
-    cancelEdgeEdit();
+    cancelSubShapeEdit();
     history.undo(doc);
     recompute();
     status("Undo: " + label);
@@ -71,7 +73,7 @@ void AppContext::redo()
     if (!history.canRedo())
         return;
     const std::string label = history.redoLabel();
-    cancelEdgeEdit();
+    cancelSubShapeEdit();
     history.redo(doc);
     recompute();
     status("Redo: " + label);
@@ -89,15 +91,15 @@ void AppContext::pruneSelection()
             return it.index < 1 || it.index > f->shape().edgeCount();
         return false;
     });
-    if (edgeEdit.active() && (!doc.find(edgeEdit.feature) || !doc.find(edgeEdit.base)))
-        edgeEdit = {};
+    if (shapeEdit.active() && (!doc.find(shapeEdit.feature) || !doc.find(shapeEdit.base)))
+        shapeEdit = {};
 }
 
 // ---- modeling commands ------------------------------------------------------------
 
 Feature* AppContext::createFeature(const std::string& type)
 {
-    cancelEdgeEdit();
+    cancelSubShapeEdit();
     Feature* f = doc.create(type);
     if (!f) {
         status("Unknown feature type " + type, true);
@@ -121,7 +123,7 @@ void AppContext::booleanFromSelection(int op)
         status(std::string(names[op]) + ": select at least two objects (the first one is the base)", true);
         return;
     }
-    cancelEdgeEdit();
+    cancelSubShapeEdit();
     auto* b = static_cast<BooleanFeature*>(doc.create("Part::Boolean"));
     b->setName(doc.uniqueName(names[op]));
     b->props().set(BooleanFeature::kOperation, op);
@@ -164,7 +166,7 @@ void AppContext::dressUpFromSelection(const std::string& type)
     std::sort(edges.begin(), edges.end());
     edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
 
-    cancelEdgeEdit();
+    cancelSubShapeEdit();
     Feature* f = doc.create(type);
     f->props().set(EdgeFeature::kBase, base);
     f->props().set(EdgeFeature::kEdges, edges);
@@ -186,7 +188,7 @@ void AppContext::deleteSelection()
     const auto feats = selection.features();
     if (feats.empty())
         return;
-    cancelEdgeEdit();
+    cancelSubShapeEdit();
 
     std::unordered_set<FeatureId> inputs;
     std::size_t removedCount = 0;
@@ -227,60 +229,176 @@ void AppContext::selectAll()
             selection.add({id});
 }
 
-void AppContext::beginEdgeEdit(FeatureId id)
+void AppContext::beginSubShapeEdit(FeatureId id)
 {
     Feature* f = doc.find(id);
-    if (!f || !f->props().find(EdgeFeature::kEdges))
+    if (!f)
         return;
-    const FeatureId base = f->props().get<FeatureId>(EdgeFeature::kBase);
+    const model::Property* prop = nullptr;
+    for (const auto& p : f->props().all())
+        if (p.type == model::PropertyType::IndexList) {
+            prop = &p;
+            break;
+        }
+    if (!prop)
+        return;
+    const FeatureId base = f->subShapeTarget(doc);
     if (!doc.find(base)) {
-        status("The base object is missing", true);
+        status("The referenced solid is missing", true);
         return;
     }
-    edgeEdit = {id, base};
+    const auto kind = prop->subShape == "face" ? render::PickKind::Face : render::PickKind::Edge;
+    shapeEdit = {id, base, kind, prop->key};
     selection.clear();
-    for (int e : f->props().get<std::vector<int>>(EdgeFeature::kEdges))
-        selection.add({base, render::PickKind::Edge, e});
-    pickFilter = render::PickFilter::Edge;
-    status("Pick edges of the base object, then press Apply (Enter)");
+    for (int e : std::get<std::vector<int>>(prop->value))
+        selection.add({base, kind, e});
+    pickFilter = kind == render::PickKind::Face ? render::PickFilter::Face : render::PickFilter::Edge;
+    status(std::string("Pick ") + (kind == render::PickKind::Face ? "faces" : "edges") +
+           " of '" + doc.find(base)->name() + "', then press Apply (Enter)");
 }
 
-void AppContext::applyEdgeEdit()
+void AppContext::applySubShapeEdit()
 {
-    if (!edgeEdit.active())
+    if (!shapeEdit.active())
         return;
-    auto edges = selection.subShapes(edgeEdit.base, render::PickKind::Edge);
-    if (edges.empty()) {
-        status("Select at least one edge", true);
+    auto items = selection.subShapes(shapeEdit.base, shapeEdit.kind);
+    const char* what = shapeEdit.kind == render::PickKind::Face ? "face" : "edge";
+    if (items.empty()) {
+        status(std::string("Select at least one ") + what, true);
         return;
     }
-    std::sort(edges.begin(), edges.end());
-    const FeatureId id = edgeEdit.feature;
-    edgeEdit = {};
-    if (Feature* f = doc.find(id)) {
-        f->props().set(EdgeFeature::kEdges, edges);
-        commit("Edit edges of " + f->name());
+    std::sort(items.begin(), items.end());
+    const SubShapeEditSession session = shapeEdit;
+    shapeEdit = {};
+    if (Feature* f = doc.find(session.feature)) {
+        f->props().set(session.property, items);
+        commit("Edit " + std::string(what) + "s of " + f->name());
         status("Updated " + f->name());
     }
+    selection.set({session.feature});
+    pickFilter = render::PickFilter::Object;
+}
+
+void AppContext::cancelSubShapeEdit()
+{
+    if (!shapeEdit.active())
+        return;
+    const FeatureId id = shapeEdit.feature;
+    shapeEdit = {};
     selection.set({id});
     pickFilter = render::PickFilter::Object;
 }
 
-void AppContext::cancelEdgeEdit()
+// ---- analysis -------------------------------------------------------------------
+
+FeatureId AppContext::contextAnalysis() const
 {
-    if (!edgeEdit.active())
+    const auto feats = selection.features();
+    if (feats.size() == 1) {
+        if (const Feature* f = doc.find(feats[0])) {
+            if (f->type() == model::StaticAnalysisFeature::kType)
+                return f->id();
+            if (const auto* bc = dynamic_cast<const model::FeaBoundaryFeature*>(f))
+                return bc->analysis();
+        }
+    }
+    if (shapeEdit.active())
+        if (const auto* bc = dynamic_cast<const model::FeaBoundaryFeature*>(doc.find(shapeEdit.feature)))
+            return bc->analysis();
+    return fea.shownAnalysis;
+}
+
+void AppContext::createAnalysisFromSelection()
+{
+    const auto feats = selection.features();
+    const Feature* solid = feats.size() == 1 ? doc.find(feats[0]) : nullptr;
+    if (!solid || !solid->producesGeometry() || solid->state() != FeatureState::Ok) {
+        status("Static analysis: select one solid first", true);
         return;
-    const FeatureId id = edgeEdit.feature;
-    edgeEdit = {};
-    selection.set({id});
-    pickFilter = render::PickFilter::Object;
+    }
+    cancelSubShapeEdit();
+    Feature* a = doc.create(model::StaticAnalysisFeature::kType);
+    a->props().set(model::StaticAnalysisFeature::kTarget, solid->id());
+    a->setName(doc.uniqueName("Static"));
+    commit("Create " + a->name());
+    selection.clear();
+    pickFilter = render::PickFilter::Face;
+    fea.shownAnalysis = a->id();
+    status("Created " + a->name() + ". Now select faces and add Fixed supports and loads.");
+}
+
+void AppContext::createBoundaryFromSelection(const std::string& type)
+{
+    const char* what = type == model::FixedSupportFeature::kType ? "Fixed support"
+                       : type == model::ForceFeature::kType      ? "Force"
+                                                                 : "Pressure";
+    FeatureId solid = kNoFeature;
+    std::vector<int> faces;
+    for (const auto& it : selection.items()) {
+        if (it.kind != render::PickKind::Face)
+            continue;
+        if (solid != kNoFeature && it.feature != solid) {
+            status(std::string(what) + ": all faces must belong to the same solid", true);
+            return;
+        }
+        solid = it.feature;
+        faces.push_back(it.index);
+    }
+    if (faces.empty()) {
+        status(std::string(what) + ": select one or more faces first (Face selection mode, key 2)", true);
+        pickFilter = render::PickFilter::Face;
+        return;
+    }
+    std::sort(faces.begin(), faces.end());
+    faces.erase(std::unique(faces.begin(), faces.end()), faces.end());
+
+    cancelSubShapeEdit();
+    // Use the analysis in context if it is for this solid, else the latest one, else create one.
+    FeatureId analysis = kNoFeature;
+    if (const auto* a = dynamic_cast<const model::StaticAnalysisFeature*>(doc.find(contextAnalysis()));
+        a && a->target() == solid)
+        analysis = a->id();
+    if (analysis == kNoFeature) {
+        const auto list = model::analysesOf(doc, solid);
+        if (!list.empty())
+            analysis = list.back();
+    }
+    if (analysis == kNoFeature) {
+        Feature* a = doc.create(model::StaticAnalysisFeature::kType);
+        a->props().set(model::StaticAnalysisFeature::kTarget, solid);
+        a->setName(doc.uniqueName("Static"));
+        analysis = a->id();
+    }
+    Feature* bc = doc.create(type);
+    bc->props().set(model::FeaBoundaryFeature::kAnalysis, analysis);
+    bc->props().set(model::FeaBoundaryFeature::kFaces, faces);
+    commit("Create " + bc->name());
+    fea.shownAnalysis = analysis;
+    selection.set({bc->id()});
+    pickFilter = render::PickFilter::Face;
+    status("Created " + bc->name() + " on " + std::to_string(faces.size()) + " face(s)");
+}
+
+void AppContext::meshAnalysis(FeatureId analysis)
+{
+    std::string err;
+    if (!fea.startMesh(*this, analysis, err))
+        status(err, true);
+}
+
+void AppContext::solveAnalysis(FeatureId analysis)
+{
+    std::string err;
+    if (!fea.startSolve(*this, analysis, err))
+        status(err, true);
 }
 
 // ---- files ---------------------------------------------------------------------
 
 void AppContext::newDocument()
 {
-    edgeEdit = {};
+    shapeEdit = {};
+    fea.reset();
     doc.clear();
     selection.clear();
     scene.clear();
@@ -295,8 +413,9 @@ void AppContext::newDocument()
 bool AppContext::openDocument(const std::string& path)
 {
     try {
-        edgeEdit = {};
+        shapeEdit = {};
         doc.load(path);
+        fea.reset();
         selection.clear();
         recompute();
         history.reset(doc);

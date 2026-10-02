@@ -87,7 +87,7 @@ void main() {
         float span = max(uScalarRange.y - uScalarRange.x, 1e-20);
         base = colormap((vScalar - uScalarRange.x) / span);
     }
-    if (vId == uHoverId) base = mix(base, uHoverColor.rgb, uHoverColor.a);
+    if (uHoverId != 0u && vId == uHoverId) base = mix(base, uHoverColor.rgb, uHoverColor.a);
 
     // Camera-attached key + fill lights, hemispheric ambient, soft specular, rim.
     vec3 L1 = normalize(vec3(-0.40, 0.55, 0.75));
@@ -158,7 +158,7 @@ uniform uint uHoverId;
 uniform vec4 uHoverColor;
 out vec4 fragColor;
 void main() {
-    fragColor = (gId == uHoverId) ? vec4(uHoverColor.rgb, 1.0) : uColor;
+    fragColor = (uHoverId != 0u && gId == uHoverId) ? vec4(uHoverColor.rgb, 1.0) : uColor;
 }
 )";
 

@@ -153,9 +153,10 @@ Property makeRefList(std::string key, std::string label, std::string group)
     return p;
 }
 
-Property makeIndexList(std::string key, std::string label, std::string group)
+Property makeIndexList(std::string key, std::string label, std::string subShape, std::string group)
 {
     Property p;
+    p.subShape = std::move(subShape);
     p.key = std::move(key);
     p.label = std::move(label);
     p.group = std::move(group);

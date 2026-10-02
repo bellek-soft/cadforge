@@ -123,7 +123,7 @@ geom::Shape BooleanFeature::execute(const ExecContext& ctx)
 EdgeFeature::EdgeFeature()
 {
     props().add(makeRef(kBase, "Base", "Inputs"));
-    Property& e = props().add(makeIndexList(kEdges, "Edges", "Edges"));
+    Property& e = props().add(makeIndexList(kEdges, "Edges", "edge", "Edges"));
     e.tooltip = "1-based edge indices of the base shape";
 }
 
@@ -147,6 +147,11 @@ geom::Shape ChamferFeature::execute(const ExecContext& ctx)
 {
     return geom::chamfer(ctx.input(props().get<FeatureId>(kBase)), props().get<std::vector<int>>(kEdges),
                          props().get<double>("distance"));
+}
+
+FeatureId EdgeFeature::subShapeTarget(const Document&) const
+{
+    return props().get<FeatureId>(kBase);
 }
 
 // ---- Import STEP ----------------------------------------------------------------

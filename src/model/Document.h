@@ -52,6 +52,9 @@ public:
     std::vector<FeatureId> consumers(FeatureId id) const;
     /// True if a consuming feature (e.g. a boolean) uses `id` as input.
     bool isConsumed(FeatureId id) const;
+    /// Features shown as children of `id` because they nest under their input
+    /// (Feature::nestUnderInput), e.g. the loads of an analysis.
+    std::vector<FeatureId> nestedChildren(FeatureId id) const;
     /// Features not consumed by anything (the top level of the tree).
     std::vector<FeatureId> roots() const;
     /// All features that transitively depend on `id`.

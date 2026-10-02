@@ -4,12 +4,27 @@
   "version-string": "0.1.0",
   "description": "CadForge - parametric 3D CAD built on OpenCASCADE, OpenGL and Dear ImGui",
   "dependencies": [
-    { "name": "opencascade", "default-features": false },
+    {
+      "name": "opencascade",
+      "default-features": false
+    },
     "glfw3",
-    { "name": "imgui", "features": [ "docking-experimental", "glfw-binding", "opengl3-binding" ] },
+    {
+      "name": "imgui",
+      "features": [
+        "docking-experimental",
+        "glfw-binding",
+        "opengl3-binding"
+      ]
+    },
     "imguizmo",
     "glm",
-    "nlohmann-json"
+    "nlohmann-json",
+    "eigen3",
+    {
+      "name": "netgen",
+      "default-features": false
+    }
   ],
   "builtin-baseline": "fbb0f7bb200b07a9eb9081c7a3cf51d1aa1c51a1"
 }

@@ -14,6 +14,8 @@ void importStep(AppContext& ctx);
 void exportStep(AppContext& ctx);
 void exportStl(AppContext& ctx);
 void loadDemo(AppContext& ctx);
+/// Cantilever plate with a fixed support and a force, solved right away.
+void loadAnalysisDemo(AppContext& ctx);
 } // namespace cmd
 
 } // namespace cf::app

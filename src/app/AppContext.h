@@ -2,6 +2,7 @@
 // Application state shared by all UI panels plus the high-level editing
 // operations ("commands"). Panels stay thin: they read state and call these.
 
+#include "app/FeaController.h"
 #include "app/SceneView.h"
 #include "app/Selection.h"
 #include "model/Document.h"
@@ -17,10 +18,13 @@ namespace cf::app {
 
 enum class GizmoMode { None, Translate, Rotate };
 
-/// Active while the user re-picks the edges of a fillet/chamfer.
-struct EdgeEditSession {
-    FeatureId feature = kNoFeature; // the fillet / chamfer being edited
-    FeatureId base = kNoFeature;    // its input, shown instead while editing
+/// Active while the user re-picks the faces/edges referenced by a feature
+/// (fillet/chamfer edges, faces of a support or load).
+struct SubShapeEditSession {
+    FeatureId feature = kNoFeature;                 // the feature being edited
+    FeatureId base = kNoFeature;                    // the solid whose sub-shapes are picked
+    render::PickKind kind = render::PickKind::Edge; // Face or Edge
+    std::string property;                           // IndexList property key
     bool active() const { return feature != kNoFeature; }
 };
 
@@ -41,12 +45,13 @@ public:
     model::History history;
     Selection selection;
     SceneView scene;
+    FeaController fea;
     render::Camera camera;
     render::Renderer renderer;
     render::RenderSettings settings;
     render::PickFilter pickFilter = render::PickFilter::Object;
     GizmoMode gizmo = GizmoMode::Translate;
-    EdgeEditSession edgeEdit;
+    SubShapeEditSession shapeEdit;
     render::PickResult hover;     // what is under the cursor
     FeatureId hoverFeature = kNoFeature;
     model::RecomputeStats lastRecompute;
@@ -80,9 +85,21 @@ public:
     void setVisible(FeatureId id, bool visible);
     void selectAll();
 
-    void beginEdgeEdit(FeatureId feature);
-    void applyEdgeEdit();
-    void cancelEdgeEdit();
+    // --- analysis ---
+    /// Creates a static analysis for the selected solid.
+    void createAnalysisFromSelection();
+    /// Creates a support / load ("FEA::FixedSupport", "FEA::Force", "FEA::Pressure")
+    /// on the selected faces (creating an analysis if the solid has none).
+    void createBoundaryFromSelection(const std::string& type);
+    /// Analysis the user is working on: the selected analysis, or the analysis of the
+    /// selected support/load, or the one whose results are shown.
+    FeatureId contextAnalysis() const;
+    void meshAnalysis(FeatureId analysis);
+    void solveAnalysis(FeatureId analysis);
+
+    void beginSubShapeEdit(FeatureId feature);
+    void applySubShapeEdit();
+    void cancelSubShapeEdit();
 
     // --- files ---
     void newDocument();

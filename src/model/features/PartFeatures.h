@@ -73,6 +73,7 @@ public:
     static constexpr const char* kBase = "base";
     static constexpr const char* kEdges = "edges";
     EdgeFeature();
+    FeatureId subShapeTarget(const Document& doc) const override;
 };
 
 class FilletFeature final : public EdgeFeature {

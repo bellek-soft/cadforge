@@ -58,6 +58,21 @@ public:
     /// CSG semantics: inputs of this feature are "consumed" (hidden, shown as children).
     virtual bool consumesInputs() const { return true; }
 
+    /// False for features that carry data but no geometry (analysis studies,
+    /// loads, constraints ...). For those execute() is never called; validate()
+    /// is used instead to report problems.
+    virtual bool producesGeometry() const { return true; }
+    /// Checks a non-geometric feature. Throw (e.g. geom::GeomError) to report an error.
+    virtual void validate(const ExecContext& ctx) { (void)ctx; }
+    /// Show this feature as a child of its (first) input in the model tree,
+    /// e.g. loads under their analysis.
+    virtual bool nestUnderInput() const { return false; }
+    /// The feature whose faces/edges an IndexList property of this feature refers to.
+    virtual FeatureId subShapeTarget(const Document& doc) const { (void)doc; return kNoFeature; }
+    /// Called by editors after the user changed property `key` (e.g. to apply a
+    /// material preset). Returns true if other properties were modified.
+    virtual bool onPropertyEdited(std::string_view key) { (void)key; return false; }
+
     // --- identity & appearance ---
     FeatureId id() const { return m_id; }
     const std::string& name() const { return m_name; }

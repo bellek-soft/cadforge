@@ -62,6 +62,7 @@ void drawMainMenu(AppContext& ctx, bool& quitRequested)
         }
         ImGui::Separator();
         if (ImGui::MenuItem("Load Demo Scene")) cmd::loadDemo(ctx);
+        if (ImGui::MenuItem("Load Analysis Demo")) cmd::loadAnalysisDemo(ctx);
         ImGui::Separator();
         if (ImGui::MenuItem("Quit", sc("Q").c_str())) quitRequested = true;
         ImGui::EndMenu();
@@ -102,6 +103,8 @@ void drawMainMenu(AppContext& ctx, bool& quitRequested)
         if (ImGui::MenuItem("No Gizmo", "Q", ctx.gizmo == GizmoMode::None)) ctx.gizmo = GizmoMode::None;
         ImGui::EndMenu();
     }
+
+    drawAnalysisMenu(ctx);
 
     if (ImGui::BeginMenu("View")) {
         if (ImGui::MenuItem("Fit All", "F")) ctx.fitAll();
@@ -145,7 +148,10 @@ void drawStatusBar(AppContext& ctx)
         if (ImGui::BeginMenuBar()) {
             const double age = std::chrono::duration<double>(
                                    std::chrono::steady_clock::now().time_since_epoch()).count() - ctx.statusTime();
-            if (!ctx.statusText().empty() && (age < 12.0 || ctx.statusIsError())) {
+            if (ctx.fea.busy()) {
+                ImGui::TextColored(ImVec4(0.45f, 0.75f, 1.0f, 1.0f), "%s  %.0f%%", ctx.fea.progressText().c_str(),
+                                   ctx.fea.progress() * 100.0);
+            } else if (!ctx.statusText().empty() && (age < 12.0 || ctx.statusIsError())) {
                 if (ctx.statusIsError())
                     ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", ctx.statusText().c_str());
                 else
@@ -200,13 +206,13 @@ void handleShortcuts(AppContext& ctx, bool& quitRequested)
 
     if (pressed(ImGuiKey_Delete) || pressed(ImGuiKey_Backspace)) ctx.deleteSelection();
     if (pressed(ImGuiKey_Escape)) {
-        if (ctx.edgeEdit.active())
-            ctx.cancelEdgeEdit();
+        if (ctx.shapeEdit.active())
+            ctx.cancelSubShapeEdit();
         else
             ctx.selection.clear();
     }
-    if (ctx.edgeEdit.active() && (pressed(ImGuiKey_Enter) || pressed(ImGuiKey_KeypadEnter)))
-        ctx.applyEdgeEdit();
+    if (ctx.shapeEdit.active() && (pressed(ImGuiKey_Enter) || pressed(ImGuiKey_KeypadEnter)))
+        ctx.applySubShapeEdit();
 
     if (pressed(ImGuiKey_1)) ctx.pickFilter = PickFilter::Object;
     if (pressed(ImGuiKey_2)) ctx.pickFilter = PickFilter::Face;
@@ -223,6 +229,13 @@ void handleShortcuts(AppContext& ctx, bool& quitRequested)
     if (pressed(ImGuiKey_N)) ctx.booleanFromSelection(model::BooleanFeature::Intersect);
     if (pressed(ImGuiMod_Shift | ImGuiKey_F)) ctx.dressUpFromSelection("Part::Fillet");
     if (pressed(ImGuiMod_Shift | ImGuiKey_C)) ctx.dressUpFromSelection("Part::Chamfer");
+
+    if (pressed(ImGuiKey_F5) && !ctx.fea.busy()) {
+        if (FeatureId a = ctx.contextAnalysis(); a != kNoFeature)
+            ctx.solveAnalysis(a);
+        else
+            ctx.status("Solve: select the analysis to solve", true);
+    }
 
     if (pressed(ImGuiKey_Keypad0)) ctx.camera.setStandardView(StandardView::Isometric);
     if (pressed(ImGuiKey_Keypad1)) ctx.camera.setStandardView(StandardView::Front);

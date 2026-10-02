@@ -1,11 +1,37 @@
 #include "app/Commands.h"
 #include "app/AppContext.h"
 
+#include "geom/Tessellator.h"
+#include "model/features/FeaFeatures.h"
 #include "model/features/PartFeatures.h"
 
 namespace cf::app::cmd {
 
 namespace {
+/// 1-based index of the face of `shape` whose centroid is closest to `p`.
+int faceClosestTo(const geom::Shape& shape, const Vec3& p)
+{
+    const MeshData m = geom::tessellate(shape);
+    int best = 0;
+    double bestD = 1e300;
+    for (std::size_t f = 0; f < m.faceRanges.size(); ++f) {
+        const auto& r = m.faceRanges[f];
+        if (r.count == 0)
+            continue;
+        Vec3 c(0.0);
+        for (std::uint32_t i = r.first; i < r.first + r.count; ++i) {
+            const auto v = m.indices[i];
+            c += Vec3(m.positions[3 * v], m.positions[3 * v + 1], m.positions[3 * v + 2]);
+        }
+        c /= double(r.count);
+        if (glm::distance(c, p) < bestD) {
+            bestD = glm::distance(c, p);
+            best = int(f) + 1;
+        }
+    }
+    return best;
+}
+
 const std::vector<std::string> kProjectFilter = {"CadForge project (*.cfp)", "*.cfp"};
 const std::vector<std::string> kStepFilter = {"STEP (*.step *.stp)", "*.step *.stp *.STEP *.STP"};
 const std::vector<std::string> kStlFilter = {"STL (*.stl)", "*.stl"};
@@ -126,6 +152,54 @@ void loadDemo(AppContext& ctx)
     ctx.commit("Load demo");
     ctx.fitAll();
     ctx.status("Demo scene loaded - select an object to edit its parameters");
+}
+
+void loadAnalysisDemo(AppContext& ctx)
+{
+    using namespace model;
+    auto& doc = ctx.doc;
+    // A plate with a lightening hole, clamped at one end and loaded at the other.
+    auto* plate = doc.create("Part::Box");
+    plate->setName(doc.uniqueName("Plate"));
+    plate->props().set("length", 120.0);
+    plate->props().set("width", 30.0);
+    plate->props().set("height", 8.0);
+    plate->setColor({0.60f, 0.68f, 0.78f, 1.f});
+    auto* hole = doc.create("Part::Cylinder");
+    hole->setName(doc.uniqueName("Hole"));
+    hole->props().set("radius", 8.0);
+    hole->props().set("height", 20.0);
+    hole->setPlacement({{70, 15, -5}, {0, 0, 0}});
+    auto* part = doc.create("Part::Boolean");
+    part->setName(doc.uniqueName("Bracket"));
+    part->props().set(BooleanFeature::kOperation, int(BooleanFeature::Cut));
+    part->props().set(BooleanFeature::kBase, plate->id());
+    part->props().set(BooleanFeature::kTools, std::vector<FeatureId>{hole->id()});
+    part->setColor(plate->color());
+    plate->setVisible(false);
+    hole->setVisible(false);
+    doc.recompute();
+    if (part->state() != FeatureState::Ok) {
+        ctx.status("Demo failed: " + part->error(), true);
+        return;
+    }
+
+    auto* study = doc.create(StaticAnalysisFeature::kType);
+    study->setName(doc.uniqueName("Static"));
+    study->props().set(StaticAnalysisFeature::kTarget, part->id());
+    study->props().set(StaticAnalysisFeature::kElementSize, 4.0);
+    auto* fixed = doc.create(FixedSupportFeature::kType);
+    fixed->props().set(FeaBoundaryFeature::kAnalysis, study->id());
+    fixed->props().set(FeaBoundaryFeature::kFaces, std::vector<int>{faceClosestTo(part->shape(), {0, 15, 4})});
+    auto* force = doc.create(ForceFeature::kType);
+    force->props().set(FeaBoundaryFeature::kAnalysis, study->id());
+    force->props().set(FeaBoundaryFeature::kFaces, std::vector<int>{faceClosestTo(part->shape(), {120, 15, 4})});
+    force->props().set(ForceFeature::kForce, Vec3(0, 0, -400.0));
+
+    ctx.commit("Load analysis demo");
+    ctx.selection.set({study->id()});
+    ctx.fitAll();
+    ctx.solveAnalysis(study->id());
 }
 
 } // namespace cf::app::cmd

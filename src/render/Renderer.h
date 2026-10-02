@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace cf::render {
@@ -28,6 +29,7 @@ struct DrawItem {
     bool hovered = false;            // whole-object hover
     std::vector<int> selectedFaces;  // 1-based
     std::vector<int> selectedEdges;  // 1-based
+    std::vector<std::pair<int, glm::vec3>> faceTints; // 1-based face -> color (e.g. loads)
     int hoverFace = 0;
     int hoverEdge = 0;
 

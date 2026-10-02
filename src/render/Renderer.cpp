@@ -217,6 +217,14 @@ void Renderer::render(const Camera& cam, const std::vector<DrawItem>& items, con
             m_meshProg.set("uHoverId", unsigned(it.hoverFace));
             it.mesh->drawFaces();
         }
+        if (!it.faceTints.empty()) {
+            m_meshProg.set("uUseScalars", 0);
+            m_meshProg.set("uHoverId", unsigned(it.hoverFace));
+            for (const auto& [face, color] : it.faceTints) {
+                m_meshProg.set("uColor", glm::vec4(color, 1.0f));
+                it.mesh->drawFace(face);
+            }
+        }
         if (!it.selectedFaces.empty()) {
             m_meshProg.set("uUseScalars", 0);
             m_meshProg.set("uColor", glm::vec4(s.selectionColor, 1.0f));

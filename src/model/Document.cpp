@@ -191,11 +191,24 @@ bool Document::isConsumed(FeatureId id) const
     return false;
 }
 
+std::vector<FeatureId> Document::nestedChildren(FeatureId id) const
+{
+    std::vector<FeatureId> out;
+    for (const auto& f : m_features) {
+        if (!f->nestUnderInput())
+            continue;
+        const auto in = f->inputs();
+        if (!in.empty() && in[0] == id)
+            out.push_back(f->id());
+    }
+    return out;
+}
+
 std::vector<FeatureId> Document::roots() const
 {
     std::vector<FeatureId> out;
     for (const auto& f : m_features)
-        if (!isConsumed(f->id()))
+        if (!isConsumed(f->id()) && !(f->nestUnderInput() && !f->inputs().empty() && find(f->inputs()[0])))
             out.push_back(f->id());
     return out;
 }
@@ -298,7 +311,17 @@ RecomputeStats Document::recompute()
         // 2) Execute or reuse.
         if (localKey != f->m_localKey || f->m_state == FeatureState::Pending) {
             f->m_localKey = localKey;
-            if (const geom::Shape* cached = cacheFind(localKey)) {
+            if (!f->producesGeometry()) {
+                try {
+                    f->validate(ctx);
+                    f->m_state = FeatureState::Ok;
+                    f->m_error.clear();
+                } catch (const std::exception& e) {
+                    f->m_state = FeatureState::Error;
+                    f->m_error = e.what();
+                }
+                f->m_localShape = {};
+            } else if (const geom::Shape* cached = cacheFind(localKey)) {
                 f->m_localShape = *cached;
                 f->m_state = FeatureState::Ok;
                 f->m_error.clear();
@@ -324,7 +347,7 @@ RecomputeStats Document::recompute()
         // 3) Apply placement (cheap: shares geometry and triangulation).
         const Placement pl = f->placement();
         std::uint64_t resultKey = localKey;
-        if (f->m_state == FeatureState::Ok) {
+        if (f->m_state == FeatureState::Ok && f->producesGeometry()) {
             try {
                 f->m_shape = pl.isIdentity() ? f->m_localShape : f->m_localShape.transformed(pl.matrix());
             } catch (const std::exception& e) {

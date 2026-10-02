@@ -7,3 +7,10 @@ add_library(cadforge::glad ALIAS cadforge_glad)
 add_library(cadforge_pfd INTERFACE)
 target_include_directories(cadforge_pfd SYSTEM INTERFACE pfd)
 add_library(cadforge::pfd ALIAS cadforge_pfd)
+
+# AMGCL 1.4.9: header-only algebraic multigrid (MIT). Vendored (no vcpkg port);
+# used without Boost.
+add_library(cadforge_amgcl INTERFACE)
+target_include_directories(cadforge_amgcl SYSTEM INTERFACE amgcl)
+target_compile_definitions(cadforge_amgcl INTERFACE AMGCL_NO_BOOST)
+add_library(cadforge::amgcl ALIAS cadforge_amgcl)
