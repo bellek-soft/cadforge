@@ -16,7 +16,9 @@
                                         |                      |
             +-------------+-------------v---------+            |
   geom      | Shape (opaque)  Primitives  Ops     |            |
-            | Tessellator  ShapeIO   [OCCT here]  |            |
+            | Profile  Tessellator  ShapeIO [OCCT]|            |
+            +---------------------------+---------+            |
+  sketch    | Sketch (geometry, constraints)  solve() [PlaneGCS]|  (core only)
             +---------------------------+---------+            |
   fea       | Mesher [Netgen]  Solver [Eigen, AMGCL]  Post     |  (core only)
             +---------------------------+---------+            |
@@ -51,6 +53,9 @@ Rules that keep the code base healthy as it grows:
   content hash of *type + parameters + input result keys*. Unchanged features are skipped; known results
   come from a bounded shape cache. Placement-only edits do not re-execute the feature at all
   (`Shape::transformed` shares geometry and triangulation), which keeps gizmo dragging interactive.
+* Data that does not fit into properties (sketch geometry and constraints) is stored by the feature itself
+  through `Feature::saveData` / `loadData` under `"data"` in the file and the undo snapshots, and is part of
+  the cache key via `cacheSalt()`.
 * Errors (`geom::GeomError`, wrapping OCCT's `Standard_Failure`) put a feature into the `Error` state with a
   message; dependents fail gracefully; nothing crashes.
 * `History` stores JSON snapshots (parameters only). Undo = reload the snapshot; thanks to the cache,
@@ -95,10 +100,35 @@ get defaults, so the format can evolve. Bump `formatVersion` for breaking change
 
 ## 5. Roadmap
 
+### Sketcher (implemented in v0.3)
+
+```
+ sketch (core only)                 model                              app
+ ------------------------------     ---------------------------------  ---------------------------------
+ Sketch: Geometry (point, line,     SketchFeature: plane + offset,     SketchEditor: working copy, local
+   circle, arc; construction)         sketch data (saveData/loadData)    undo, tools, auto-constraints,
+ Constraint: refs (geo, pos)          execute(): solve -> 3D edges       constraint-from-selection, drag
+   + value; external origin/axes    Extrude / Revolve (ProfileFeature) ui/SketchUi: overlay drawing,
+ solve(): PlaneGCS (DogLeg -> LM      profile faces (geom::Profile)      screen-space picking, dimension
+   -> BFGS), DOF, conflicting /       + boolean with a target body       labels, panel, shortcuts
+   redundant / malformed, drag
+```
+
+* **Solver:** every solve builds a fresh `GCS::System`; constraint *i* gets tag *i+1* so PlaneGCS diagnostics map
+  back to constraint indices. Redundant constraints make the Jacobian singular, so the sketch is re-solved without
+  them and they are reported. Dragging adds temporary low-priority constraints (tag -1). Conflicting or failed
+  solves leave the geometry untouched.
+* **Profiles:** `geom::makePlanarFaces` connects the sketch edges into wires (`BOPAlgo_Tools::EdgesToWires`),
+  rejects open / self-intersecting loops, sorts loops by area and nests them by point classification: even
+  depth = outer boundary, odd depth = hole (islands inside holes become solids again).
+* **Editing in place:** the camera turns orthographically to the sketch plane; the sketch is drawn as an ImGui
+  overlay (no GPU round trip), picking is done in screen space (points before edges, labels first). Each edit is
+  solved immediately; edits that would conflict or add redundancy are refused. The document gets a single undo step
+  when the sketch is closed; the sketch editor has its own undo stack meanwhile.
+
 ### CSG (beyond v0.1)
 
-* Sketcher (2D constraints) + Extrude / Revolve / Sweep / Loft features -> `geom` wrappers around
-  `BRepPrimAPI_MakePrism`, `BRepPrimAPI_MakeRevol`, `BRepOffsetAPI_*`.
+* Sweep / Loft features -> `geom` wrappers around `BRepOffsetAPI_*`; sketches on faces of solids.
 * Mirror / linear and polar patterns, shell, draft.
 * **Topological naming:** fillet edges are stored as 1-based edge indices of the input shape. They stay
   valid while the input's topology does not change. A robust solution (history-based naming through

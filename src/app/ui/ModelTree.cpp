@@ -24,6 +24,9 @@ const char* typeTag(const Feature& f)
     if (t == "Part::Fillet") return "F";
     if (t == "Part::Chamfer") return "C";
     if (t == "Part::ImportStep") return "S";
+    if (t == "Sketch::Sketch") return "~";
+    if (t == "Part::Extrude") return "E";
+    if (t == "Part::Revolve") return "R";
     if (t == "FEA::StaticAnalysis") return "A";
     if (t == "FEA::FixedSupport") return "|";
     if (t == "FEA::Force") return ">";
@@ -66,8 +69,12 @@ void drawNode(AppContext& ctx, const Feature& f, std::unordered_set<FeatureId>& 
         if (ctx.shapeEdit.active())
             ctx.cancelSubShapeEdit();
     }
-    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && inputs.empty())
-        ctx.fitSelection();
+    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+        if (f.type() == "Sketch::Sketch")
+            ctx.editSketch(f.id());
+        else if (inputs.empty())
+            ctx.fitSelection();
+    }
 
     if (ImGui::BeginPopupContextItem("ctx")) {
         if (!ctx.selection.isFeatureSelected(f.id()))
@@ -76,6 +83,8 @@ void drawNode(AppContext& ctx, const Feature& f, std::unordered_set<FeatureId>& 
             ctx.setVisible(f.id(), !f.visible());
         if (ImGui::MenuItem("Fit to view"))
             ctx.fitSelection();
+        if (f.type() == "Sketch::Sketch" && ImGui::MenuItem("Edit sketch"))
+            ctx.editSketch(f.id());
         ImGui::Separator();
         if (ImGui::MenuItem("Delete"))
             ctx.deleteSelection();

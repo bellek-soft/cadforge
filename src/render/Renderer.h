@@ -24,6 +24,7 @@ struct DrawItem {
     std::uint32_t pickId = 0;        // 0 = not pickable
     glm::vec4 color{0.7f, 0.7f, 0.7f, 1.0f};
     Style style = Style::Solid;
+    bool wire = false;               // edges-only object (sketch): edges drawn in `color`, always visible
 
     bool selected = false;           // whole-object selection
     bool hovered = false;            // whole-object hover

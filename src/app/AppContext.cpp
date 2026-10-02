@@ -5,6 +5,7 @@
 #include "geom/ShapeIO.h"
 #include "model/features/FeaFeatures.h"
 #include "model/features/PartFeatures.h"
+#include "model/features/SketchFeatures.h"
 
 #include <algorithm>
 #include <chrono>
@@ -59,6 +60,10 @@ void AppContext::commit(const std::string& label)
 
 void AppContext::undo()
 {
+    if (sketchEdit.active()) {
+        sketchEdit.undo(*this);
+        return;
+    }
     if (!history.canUndo())
         return;
     const std::string label = history.undoLabel();
@@ -70,6 +75,10 @@ void AppContext::undo()
 
 void AppContext::redo()
 {
+    if (sketchEdit.active()) {
+        sketchEdit.redo(*this);
+        return;
+    }
     if (!history.canRedo())
         return;
     const std::string label = history.redoLabel();
@@ -185,6 +194,10 @@ void AppContext::dressUpFromSelection(const std::string& type)
 
 void AppContext::deleteSelection()
 {
+    if (sketchEdit.active()) {
+        sketchEdit.deleteSelection(*this);
+        return;
+    }
     const auto feats = selection.features();
     if (feats.empty())
         return;
@@ -211,6 +224,70 @@ void AppContext::deleteSelection()
     selection.clear();
     commit("Delete");
     status("Deleted " + std::to_string(removedCount) + " feature(s)");
+}
+
+void AppContext::createSketch(int plane)
+{
+    sketchEdit.finish(*this);
+    cancelSubShapeEdit();
+    auto* sk = static_cast<model::SketchFeature*>(doc.create("Sketch::Sketch"));
+    sk->props().set(model::SketchFeature::kPlane, plane);
+    commit("Create " + sk->name());
+    selection.set({sk->id()});
+    pickFilter = render::PickFilter::Object;
+    sketchEdit.begin(*this, sk->id());
+}
+
+void AppContext::editSketch(FeatureId id)
+{
+    if (!dynamic_cast<model::SketchFeature*>(doc.find(id))) {
+        status("Edit sketch: select a sketch", true);
+        return;
+    }
+    sketchEdit.begin(*this, id);
+}
+
+void AppContext::profileFeatureFromSelection(const std::string& type)
+{
+    const char* what = type == "Part::Revolve" ? "Revolve" : "Extrude";
+    if (sketchEdit.active())
+        sketchEdit.finish(*this);
+    FeatureId sketchId = kNoFeature, target = kNoFeature;
+    for (FeatureId id : selection.features()) {
+        const Feature* f = doc.find(id);
+        if (!f)
+            continue;
+        if (dynamic_cast<const model::SketchFeature*>(f)) {
+            if (sketchId == kNoFeature)
+                sketchId = id;
+        } else if (f->producesGeometry() && target == kNoFeature) {
+            target = id;
+        }
+    }
+    if (sketchId == kNoFeature) {
+        status(std::string(what) + ": select a sketch (and optionally the body to join)", true);
+        return;
+    }
+    cancelSubShapeEdit();
+    Feature* f = doc.create(type);
+    f->props().set(model::ProfileFeature::kSketch, sketchId);
+    if (target != kNoFeature) {
+        f->props().set(model::ProfileFeature::kOperation, int(model::ProfileFeature::Join));
+        f->props().set(model::ProfileFeature::kTarget, target);
+        if (Feature* t = doc.find(target)) {
+            t->setVisible(false);
+            f->setColor(t->color());
+        }
+    }
+    if (Feature* sk = doc.find(sketchId))
+        sk->setVisible(false);
+    commit(f->name());
+    selection.set({f->id()});
+    pickFilter = render::PickFilter::Object;
+    if (f->state() == FeatureState::Error)
+        status(f->name() + ": " + f->error(), true);
+    else
+        status("Created " + f->name() + " - set length / operation in the property panel");
 }
 
 void AppContext::setVisible(FeatureId id, bool visible)
@@ -397,6 +474,7 @@ void AppContext::solveAnalysis(FeatureId analysis)
 
 void AppContext::newDocument()
 {
+    sketchEdit.finish(*this);
     shapeEdit = {};
     fea.reset();
     doc.clear();
@@ -413,6 +491,7 @@ void AppContext::newDocument()
 bool AppContext::openDocument(const std::string& path)
 {
     try {
+        sketchEdit.finish(*this);
         shapeEdit = {};
         doc.load(path);
         fea.reset();
@@ -498,6 +577,7 @@ void AppContext::exportStl(const std::string& path)
 
 void AppContext::guardUnsaved(std::function<void()> action)
 {
+    sketchEdit.finish(*this);
     if (!isModified()) {
         action();
         return;

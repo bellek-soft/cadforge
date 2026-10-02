@@ -127,16 +127,30 @@ void Camera::fit(const BoundingBox& bb, bool animate)
 void Camera::setStandardView(StandardView v, bool animate)
 {
     State s = m_animating ? m_to : m_state;
-    switch (v) {
-    case StandardView::Front:     s.yawDeg = -90; s.pitchDeg = 0; break;
-    case StandardView::Back:      s.yawDeg = 90;  s.pitchDeg = 0; break;
-    case StandardView::Right:     s.yawDeg = 0;   s.pitchDeg = 0; break;
-    case StandardView::Left:      s.yawDeg = 180; s.pitchDeg = 0; break;
-    case StandardView::Top:       s.yawDeg = -90; s.pitchDeg = 90; break;
-    case StandardView::Bottom:    s.yawDeg = -90; s.pitchDeg = -90; break;
-    case StandardView::Isometric: s.yawDeg = -45; s.pitchDeg = 35.264; break;
-    }
+    viewAngles(v, s.yawDeg, s.pitchDeg);
     animate ? animateTo(s) : setState(s);
+}
+
+void Camera::viewFrom(StandardView v, const Vec3& target, double distance, bool animate)
+{
+    State s;
+    viewAngles(v, s.yawDeg, s.pitchDeg);
+    s.target = target;
+    s.distance = std::clamp(distance, 1e-3, 1e7);
+    animate ? animateTo(s) : setState(s);
+}
+
+void Camera::viewAngles(StandardView v, double& yawDeg, double& pitchDeg)
+{
+    switch (v) {
+    case StandardView::Front:     yawDeg = -90; pitchDeg = 0; break;
+    case StandardView::Back:      yawDeg = 90;  pitchDeg = 0; break;
+    case StandardView::Right:     yawDeg = 0;   pitchDeg = 0; break;
+    case StandardView::Left:      yawDeg = 180; pitchDeg = 0; break;
+    case StandardView::Top:       yawDeg = -90; pitchDeg = 90; break;
+    case StandardView::Bottom:    yawDeg = -90; pitchDeg = -90; break;
+    case StandardView::Isometric: yawDeg = -45; pitchDeg = 35.264; break;
+    }
 }
 
 void Camera::animateTo(const State& s)

@@ -242,9 +242,11 @@ void Renderer::render(const Camera& cam, const std::vector<DrawItem>& items, con
     for (const DrawItem& it : items) {
         if (!it.mesh || it.style != DrawItem::Style::Solid)
             continue;
-        if (s.showEdges || it.selected) {
-            m_edgeProg.set("uWidth", it.selected ? s.edgeWidth * 1.4f : s.edgeWidth);
-            m_edgeProg.set("uColor", glm::vec4(it.selected ? s.selectionColor * 0.85f : s.edgeColor, 1.0f));
+        if (s.showEdges || it.selected || it.wire) {
+            const float w = it.wire ? s.edgeWidth * 1.6f : s.edgeWidth;
+            const glm::vec3 c = !it.wire ? s.edgeColor : it.hovered ? s.hoverColor : glm::vec3(it.color);
+            m_edgeProg.set("uWidth", it.selected ? w * 1.4f : w);
+            m_edgeProg.set("uColor", glm::vec4(it.selected ? s.selectionColor * 0.85f : c, 1.0f));
             m_edgeProg.set("uHoverId", unsigned(it.hoverEdge));
             it.mesh->drawEdges();
         } else if (it.hoverEdge) {
@@ -260,7 +262,7 @@ void Renderer::render(const Camera& cam, const std::vector<DrawItem>& items, con
             for (int e : it.selectedEdges)
                 it.mesh->drawEdge(e);
         }
-        if (it.hoverEdge && s.showEdges) {
+        if (it.hoverEdge && (s.showEdges || it.wire)) {
             m_edgeProg.set("uWidth", s.edgeWidth * 2.6f);
             m_edgeProg.set("uColor", glm::vec4(s.hoverColor, 1.0f));
             it.mesh->drawEdge(it.hoverEdge);

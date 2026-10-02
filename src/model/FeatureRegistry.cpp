@@ -1,6 +1,7 @@
 #include "model/FeatureRegistry.h"
 #include "model/features/FeaFeatures.h"
 #include "model/features/PartFeatures.h"
+#include "model/features/SketchFeatures.h"
 
 namespace cf::model {
 
@@ -33,8 +34,8 @@ const FeatureRegistry& builtinRegistry()
     static const FeatureRegistry reg = [] {
         FeatureRegistry r;
         registerPartFeatures(r);
+        registerSketchFeatures(r);
         registerFeaFeatures(r);
-        // Future: registerSketchFeatures(r); ...
         return r;
     }();
     return reg;

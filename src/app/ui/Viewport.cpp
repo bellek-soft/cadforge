@@ -1,4 +1,5 @@
 #include "app/ui/Ui.h"
+#include "app/ui/SketchUi.h"
 #include "app/ui/Toolbar.h"
 
 #include "app/AppContext.h"
@@ -34,6 +35,11 @@ void drawToolbar(AppContext& ctx)
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 4));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4, 4));
     Toolbar tb;
+    if (ctx.sketchEdit.active()) {
+        drawSketchToolbar(ctx, tb);
+        ImGui::PopStyleVar(2);
+        return;
+    }
 
     for (const auto& t : ctx.doc.registry().types()) {
         if (t.category != "Primitives")
@@ -41,6 +47,8 @@ void drawToolbar(AppContext& ctx)
         if (tb.button(t.label.c_str(), ("Create a " + t.label).c_str()))
             ctx.createFeature(t.type);
     }
+    tb.separator();
+    drawSketchCreateToolbar(ctx, tb);
     tb.separator();
     if (tb.button("Union", "Union of the selected objects (U)"))
         ctx.booleanFromSelection(model::BooleanFeature::Union);
@@ -145,9 +153,10 @@ void drawGizmo(AppContext& ctx, const ImVec2& origin, const ImVec2& size)
 {
     const auto feats = ctx.selection.features();
     const bool usable = ctx.gizmo != GizmoMode::None && feats.size() == 1 && !ctx.shapeEdit.active() &&
-                        ctx.pickFilter == PickFilter::Object;
+                        !ctx.sketchEdit.active() && ctx.pickFilter == PickFilter::Object;
     model::Feature* f = usable ? ctx.doc.find(feats[0]) : nullptr;
-    g_in.gizmoShown = f && f->visible() && f->producesGeometry();
+    const model::Property* pos = f ? f->props().find(model::Feature::kPosition) : nullptr;
+    g_in.gizmoShown = f && f->visible() && f->producesGeometry() && pos && !pos->hidden;
     if (!g_in.gizmoShown) {
         g_in.gizmoWasUsing = false;
         return;
@@ -292,7 +301,8 @@ void drawViewport(AppContext& ctx)
     // Hover picking (only when the mouse is idle over the viewport).
     ctx.hover = {};
     ctx.hoverFeature = kNoFeature;
-    if (hovered && !gizmoBusy && !ImGui::IsAnyMouseDown()) {
+    const bool sketching = ctx.sketchEdit.active();
+    if (hovered && !gizmoBusy && !sketching && !ImGui::IsAnyMouseDown()) {
         const int radius = ctx.pickFilter == PickFilter::Edge ? int(5 * fbScale.x) : 1;
         ctx.renderer.resize(pxW, pxH);
         ctx.hover = ctx.renderer.pick(ctx.camera, items, ctx.pickFilter, int(mx), int(my), radius,
@@ -311,7 +321,7 @@ void drawViewport(AppContext& ctx)
                  ImVec2(pos.x + size.x, pos.y + size.y), ImVec2(0, 1), ImVec2(1, 0));
 
     // --- click selection (left release without drag) ---
-    if (hovered && !gizmoBusy && ImGui::IsMouseReleased(ImGuiMouseButton_Left) && !g_in.dragging &&
+    if (hovered && !gizmoBusy && !sketching && ImGui::IsMouseReleased(ImGuiMouseButton_Left) && !g_in.dragging &&
         g_in.pressButton == ImGuiMouseButton_Left && !io.KeyAlt && !g_in.gizmoWasUsing) {
         const int radius = ctx.pickFilter == PickFilter::Edge ? int(5 * fbScale.x) : 1;
         const auto hit = ctx.renderer.pick(ctx.camera, ctx.scene.items(), ctx.pickFilter, int(mx), int(my),
@@ -320,8 +330,9 @@ void drawViewport(AppContext& ctx)
     }
 
     // --- context menu (right click without drag) ---
-    if (hovered && ImGui::IsMouseReleased(ImGuiMouseButton_Right) && !g_in.dragging &&
-        g_in.pressButton == ImGuiMouseButton_Right)
+    const bool rightClick = hovered && ImGui::IsMouseReleased(ImGuiMouseButton_Right) && !g_in.dragging &&
+                            g_in.pressButton == ImGuiMouseButton_Right;
+    if (rightClick && !sketching)
         ImGui::OpenPopup("##viewctx");
     if (ImGui::BeginPopup("##viewctx")) {
         const bool sel = !ctx.selection.empty();
@@ -338,6 +349,14 @@ void drawViewport(AppContext& ctx)
     }
 
     // --- overlays ---
+    if (sketching) {
+        SketchViewportInput sin;
+        sin.pos = pos;
+        sin.size = size;
+        sin.hovered = hovered;
+        sin.rightClick = rightClick;
+        sketchViewport(ctx, sin);
+    }
     drawGizmo(ctx, pos, size);
     drawAxisTriad(ctx, dl, pos, size);
     drawAnalysisOverlay(ctx, dl, pos, size);
@@ -353,8 +372,8 @@ void drawViewport(AppContext& ctx)
                           IM_COL32(40, 30, 10, 220), 4.0f);
         dl->AddText(p, IM_COL32(255, 200, 90, 255), msg);
     }
-    if (ctx.doc.features().empty()) {
-        const char* msg = "Create a primitive from the toolbar, or File > Load Demo Scene";
+    if (ctx.doc.features().empty() && !sketching) {
+        const char* msg = "Create a primitive or a sketch from the toolbar, or File > Load Demo Scene";
         const ImVec2 ts = ImGui::CalcTextSize(msg);
         dl->AddText(ImVec2(pos.x + (size.x - ts.x) * 0.5f, pos.y + size.y * 0.5f - ts.y),
                     IM_COL32(200, 205, 215, 160), msg);

@@ -3,6 +3,8 @@
 A parametric 3D CAD desktop application in modern C++20.
 
 * **Geometry kernel:** OpenCASCADE (B-Rep): primitives, booleans (CSG), fillet, chamfer, STEP/STL
+* **Sketcher:** constrained 2D sketches (FreeCAD's PlaneGCS solver) edited in place in the 3D view,
+  turned into solids with Extrude / Revolve (new body, join, cut, intersect)
 * **Rendering:** OpenGL 4.1 core (runs on macOS, Windows and Linux), MSAA, GPU id-buffer picking
 * **UI:** Dear ImGui (docking) + GLFW, ImGuizmo transform gizmo
 * **Model:** history-based feature tree with dependency-ordered recompute, result caching,
@@ -12,12 +14,15 @@ A parametric 3D CAD desktop application in modern C++20.
 
 ![screenshot](docs/screenshot.png)
 ![analysis](docs/screenshot-fea.png)
+![sketch](docs/screenshot-sketch.png)
 
 ## Features (v0.1)
 
 | Area | What you get |
 |---|---|
 | Primitives | Box, Cylinder (incl. partial angle), Sphere, Cone/Frustum, Torus |
+| Sketcher | Sketches on the XY / XZ / YZ planes (with offset), edited in place: lines/polylines, rectangles, circles, arcs, points, construction geometry; coincident, point-on-object, horizontal, vertical, parallel, perpendicular, tangent, equal, symmetric, midpoint, lock; distance, horizontal/vertical distance, radius, diameter and angle dimensions; automatic constraints while drawing, dragging under constraints, degrees-of-freedom and conflict/redundancy reporting |
+| Sketch features | Extrude (length, symmetric, reversed) and Revolve (sketch axis or construction line, angle) of closed profiles incl. holes and islands; result as new body or joined with / cut from / intersected with a target body |
 | CSG | Union, Cut, Intersect with any number of tools; inputs are shown as ghosts when the result is selected |
 | Dress-up | Fillet and Chamfer on picked edges, edges can be re-picked later ("Edit...") |
 | Editing | Property panel generated from feature parameters, live preview while dragging values, move/rotate gizmo (Ctrl = snap) |
@@ -92,6 +97,23 @@ again; vcpkg installs what is missing.
 | Views | Keypad `0` iso, `1` front, `3` right, `7` top (Ctrl = opposite), `F` fit all, `O` ortho |
 | Undo / Redo | `Ctrl+Z` / `Ctrl+Shift+Z` (Cmd on macOS) |
 | Solve analysis | `F5` |
+| Sketch | toolbar **Sketch** (pick a plane), double-click a sketch to edit; `Enter`/`Esc` closes |
+| Sketch tools | `L` line, `R` rectangle (or radius with a circle selected), `C` circle, `A` arc, `P` point, `G` construction |
+| Sketch constraints | select geometry, then `H` / `V` / `D` distance / `E` equal / `T` tangent or the toolbar; double-click a dimension to edit it |
+
+### Sketching
+
+1. Press **Sketch** in the toolbar and choose a plane. The view turns to face the plane.
+2. Draw with **Line** (click points; click the first point to close, right click / `Esc` ends the
+   chain), **Rect**, **Circle**, **Arc** (center, start, end; counter-clockwise) or **Point**. Clicking on an existing
+   point or curve adds a coincident / point-on-object constraint; nearly horizontal or vertical lines get an H / V
+   constraint.
+3. Select points / curves (Ctrl/Shift adds) and apply constraints or dimensions from the toolbar. A new dimension
+   asks for its value; double-click it later to change it. Drag geometry to see what is still free. Constraints that
+   would over-constrain the sketch are refused; the banner shows the remaining degrees of freedom and turns green
+   when the sketch is fully constrained.
+4. **Close** the sketch, keep it selected and press **Extrude** or **Revolve** (select a body as well to join to
+   it). Change length, operation (new body / join / cut / intersect) and target in the property panel.
 
 ### Running an analysis
 
@@ -105,19 +127,22 @@ again; vcpkg installs what is missing.
 Units are mm, N, MPa (N/mm²), t/mm³ and mm/s². *File > Load Analysis Demo* sets up and solves a
 small cantilever plate.
 
-Command line: `CadForge [project.cfp | part.step] [--demo] [--size WxH] [--screenshot out.ppm --frames N]`
+*File > Load Sketch Demo* builds a bracket and a pulley from sketches.
+
+Command line: `CadForge [project.cfp | part.step] [--demo | --fea-demo | --sketch-demo [--edit-sketch]] [--size WxH] [--screenshot out.ppm --frames N]`
 
 ## Project layout
 
 ```
 src/core     plain data types (math, mesh data, logging)          no OCCT, no GL
 src/geom     geometry kernel facade over OpenCASCADE              the only place OCCT is used
+src/sketch   2D sketch model + PlaneGCS constraint solver          depends on core only
 src/fea      FEA engine: Netgen meshing, Eigen/AMGCL solver, post   depends on core only
 src/model    parametric document, features, recompute, undo, I/O  no GL, no UI
 src/render   OpenGL 4.1 renderer, camera, picking                 knows meshes, not features
 src/app      GLFW + ImGui application, panels, commands
 tests        kernel + model unit tests (no framework needed)
-third_party  vendored glad (GL 4.1 loader), portable-file-dialogs and AMGCL (header-only)
+third_party  vendored glad (GL 4.1 loader), portable-file-dialogs, AMGCL (header-only), PlaneGCS
 docs         architecture notes and roadmap (CSG, FEA)
 ```
 
@@ -125,5 +150,6 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and how to exten
 
 ## License notes
 
-OpenCASCADE is LGPL-2.1 with an exception, Netgen is LGPL-2.1, Eigen is MPL-2.0, AMGCL is MIT; Dear ImGui, ImGuizmo, GLFW, glm, nlohmann-json and glad are MIT/zlib-style;
+OpenCASCADE is LGPL-2.1 with an exception, Netgen is LGPL-2.1, PlaneGCS (from FreeCAD, vendored in
+`third_party/planegcs` with its license) is LGPL-2.1+, Eigen is MPL-2.0, AMGCL is MIT; Dear ImGui, ImGuizmo, GLFW, glm, nlohmann-json and glad are MIT/zlib-style;
 portable-file-dialogs is WTFPL.

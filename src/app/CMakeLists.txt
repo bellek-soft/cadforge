@@ -5,6 +5,7 @@ add_executable(CadForge
     AppContext.cpp
     Commands.cpp
     SceneView.cpp
+    SketchEditor.cpp
     FeaController.cpp
     FileDialogs.cpp
     ui/Theme.cpp
@@ -14,7 +15,8 @@ add_executable(CadForge
     ui/Viewport.cpp
     ui/Console.cpp
     ui/Dialogs.cpp
-    ui/AnalysisUi.cpp)
+    ui/AnalysisUi.cpp
+    ui/SketchUi.cpp)
 
 target_include_directories(CadForge PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_link_libraries(CadForge PRIVATE

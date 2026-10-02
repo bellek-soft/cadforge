@@ -16,6 +16,8 @@ void exportStl(AppContext& ctx);
 void loadDemo(AppContext& ctx);
 /// Cantilever plate with a fixed support and a force, solved right away.
 void loadAnalysisDemo(AppContext& ctx);
+/// Fully constrained sketches turned into solids with Extrude / Revolve.
+void loadSketchDemo(AppContext& ctx);
 } // namespace cmd
 
 } // namespace cf::app

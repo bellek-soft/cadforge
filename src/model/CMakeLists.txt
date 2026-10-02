@@ -7,8 +7,9 @@ add_library(cadforge_model STATIC
     Document.cpp
     History.cpp
     features/PartFeatures.cpp
-    features/FeaFeatures.cpp)
+    features/FeaFeatures.cpp
+    features/SketchFeatures.cpp)
 target_link_libraries(cadforge_model
-    PUBLIC cadforge::core cadforge::geom cadforge::fea nlohmann_json::nlohmann_json)
+    PUBLIC cadforge::core cadforge::geom cadforge::sketch cadforge::fea nlohmann_json::nlohmann_json)
 cadforge_set_warnings(cadforge_model)
 add_library(cadforge::model ALIAS cadforge_model)

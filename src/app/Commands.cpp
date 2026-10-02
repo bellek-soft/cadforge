@@ -4,6 +4,7 @@
 #include "geom/Tessellator.h"
 #include "model/features/FeaFeatures.h"
 #include "model/features/PartFeatures.h"
+#include "model/features/SketchFeatures.h"
 
 namespace cf::app::cmd {
 
@@ -200,6 +201,121 @@ void loadAnalysisDemo(AppContext& ctx)
     ctx.selection.set({study->id()});
     ctx.fitAll();
     ctx.solveAnalysis(study->id());
+}
+
+void loadSketchDemo(AppContext& ctx)
+{
+    using namespace model;
+    using namespace sketch;
+    auto& doc = ctx.doc;
+    auto ref = [](int g, PointPos p = PointPos::Edge) { return Ref{g, p}; };
+    auto con = [](ConstraintType t, Ref a, Ref b = {}, double v = 0.0) {
+        Constraint c;
+        c.type = t;
+        c.a = a;
+        c.b = b;
+        c.value = v;
+        return c;
+    };
+    // Closed polygon with coincident corners and H/V constraints on axis-aligned sides.
+    auto polygon = [&](Sketch& s, const std::vector<Vec2>& pts) {
+        const int first = int(s.geometry.size());
+        const int n = int(pts.size());
+        for (int i = 0; i < n; ++i)
+            s.add(Geometry::line(pts[size_t(i)], pts[size_t((i + 1) % n)]));
+        for (int i = 0; i < n; ++i)
+            s.addConstraint(con(ConstraintType::Coincident, ref(first + i, PointPos::End),
+                                ref(first + (i + 1) % n, PointPos::Start)));
+        for (int i = 0; i < n; ++i) {
+            const Vec2 d = pts[size_t((i + 1) % n)] - pts[size_t(i)];
+            if (std::abs(d.y) < 1e-9)
+                s.addConstraint(con(ConstraintType::Horizontal, ref(first + i)));
+            else if (std::abs(d.x) < 1e-9)
+                s.addConstraint(con(ConstraintType::Vertical, ref(first + i)));
+        }
+        return first;
+    };
+
+    // 1) L-shaped bracket profile on the XZ plane, extruded symmetrically.
+    auto* profile = static_cast<SketchFeature*>(doc.create("Sketch::Sketch"));
+    profile->setName(doc.uniqueName("BracketProfile"));
+    profile->props().set(SketchFeature::kPlane, int(SketchFeature::XZ));
+    {
+        Sketch s;
+        const int l = polygon(s, {{0, 0}, {60, 0}, {60, 8}, {8, 8}, {8, 45}, {0, 45}});
+        s.addConstraint(con(ConstraintType::Coincident, ref(l, PointPos::Start), ref(kOrigin, PointPos::Start)));
+        s.addConstraint(con(ConstraintType::Distance, ref(l), {}, 60.0));
+        s.addConstraint(con(ConstraintType::Distance, ref(l + 1), {}, 8.0));
+        s.addConstraint(con(ConstraintType::Distance, ref(l + 4), {}, 8.0));
+        s.addConstraint(con(ConstraintType::Distance, ref(l + 5), {}, 45.0));
+        solve(s);
+        profile->setSketch(s);
+    }
+    auto* bracket = doc.create("Part::Extrude");
+    bracket->setName(doc.uniqueName("Bracket"));
+    bracket->props().set(ProfileFeature::kSketch, profile->id());
+    bracket->props().set("length", 40.0);
+    bracket->props().set("symmetric", true);
+    bracket->setColor({0.60f, 0.68f, 0.78f, 1.f});
+    profile->setVisible(false);
+
+    // 2) Two holes cut through the base from a sketch on the XY plane.
+    auto* holes = static_cast<SketchFeature*>(doc.create("Sketch::Sketch"));
+    holes->setName(doc.uniqueName("Holes"));
+    holes->props().set(SketchFeature::kOffset, 8.0);
+    {
+        Sketch s;
+        const int c1 = s.add(Geometry::circle({25, 0}, 5));
+        const int c2 = s.add(Geometry::circle({48, 0}, 5));
+        s.addConstraint(con(ConstraintType::PointOnObject, ref(c1, PointPos::Center), ref(kHAxis)));
+        s.addConstraint(con(ConstraintType::PointOnObject, ref(c2, PointPos::Center), ref(kHAxis)));
+        s.addConstraint(con(ConstraintType::Equal, ref(c1), ref(c2)));
+        s.addConstraint(con(ConstraintType::Diameter, ref(c1), {}, 9.0));
+        s.addConstraint(con(ConstraintType::DistanceX, ref(c1, PointPos::Center), {}, 26.0));
+        s.addConstraint(con(ConstraintType::DistanceX, ref(c1, PointPos::Center), ref(c2, PointPos::Center), 22.0));
+        solve(s);
+        holes->setSketch(s);
+    }
+    auto* drilled = doc.create("Part::Extrude");
+    drilled->setName(doc.uniqueName("Drilled"));
+    drilled->props().set(ProfileFeature::kSketch, holes->id());
+    drilled->props().set(ProfileFeature::kOperation, int(ProfileFeature::Cut));
+    drilled->props().set(ProfileFeature::kTarget, bracket->id());
+    drilled->props().set("length", 20.0);
+    drilled->props().set("reversed", true);
+    drilled->setColor(bracket->color());
+    holes->setVisible(false);
+    bracket->setVisible(false);
+
+    // 3) A pulley: half cross-section revolved around the sketch V axis.
+    auto* section = static_cast<SketchFeature*>(doc.create("Sketch::Sketch"));
+    section->setName(doc.uniqueName("PulleySection"));
+    section->props().set(SketchFeature::kPlane, int(SketchFeature::XZ));
+    {
+        Sketch s;
+        const int l = polygon(s, {{6, 0}, {30, 0}, {30, 4}, {24, 8}, {30, 12}, {30, 16}, {6, 16}});
+        s.addConstraint(con(ConstraintType::Distance, ref(l, PointPos::Start), ref(kVAxis), 6.0));
+        s.addConstraint(con(ConstraintType::PointOnObject, ref(l, PointPos::Start), ref(kHAxis)));
+        s.addConstraint(con(ConstraintType::Distance, ref(l), {}, 24.0));
+        s.addConstraint(con(ConstraintType::Distance, ref(l + 5), {}, 24.0));
+        s.addConstraint(con(ConstraintType::Distance, ref(l + 6), {}, 16.0));
+        s.addConstraint(con(ConstraintType::Distance, ref(l + 1), {}, 4.0));
+        s.addConstraint(con(ConstraintType::Distance, ref(l + 4), {}, 4.0));
+        s.addConstraint(con(ConstraintType::Equal, ref(l + 2), ref(l + 3)));
+        s.addConstraint(con(ConstraintType::DistanceX, ref(l + 3, PointPos::Start), ref(l + 2, PointPos::Start), 6.0));
+        solve(s);
+        section->setSketch(s);
+    }
+    auto* pulley = doc.create("Part::Revolve");
+    pulley->setName(doc.uniqueName("Pulley"));
+    pulley->props().set(ProfileFeature::kSketch, section->id());
+    pulley->setColor({0.80f, 0.66f, 0.50f, 1.f});
+    pulley->setPlacement({{110, 0, 0}, {0, 0, 0}});
+    section->setVisible(false);
+
+    ctx.commit("Load sketch demo");
+    ctx.fitAll();
+    ctx.status("Sketch demo loaded - double-click a sketch in the tree to edit it");
 }
 
 } // namespace cf::app::cmd

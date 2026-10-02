@@ -133,6 +133,7 @@ const std::vector<DrawItem>& SceneView::build(AppContext& ctx)
             return;
         DrawItem item;
         item.mesh = mesh;
+        item.wire = !fea && f.shape().faceCount() == 0; // sketches: edges only
         if (fea) {
             item.showScalars = feaScalars;
             item.scalarRange = feaRange;
@@ -186,8 +187,10 @@ const std::vector<DrawItem>& SceneView::build(AppContext& ctx)
     }
 
     for (const auto& f : doc.features())
-        if (f->visible() || f->id() == feaTarget)
+        if ((f->visible() || f->id() == feaTarget) && f->id() != ctx.sketchEdit.feature())
             addSolid(*f);
+    if (ctx.sketchEdit.active())
+        return m_items; // the sketch itself is drawn by the sketch editor overlay
 
     // Undeformed outline under a deformed result.
     if (feaTarget != kNoFeature && feaScalars && ctx.fea.effectiveDeformationScale(shown) > 0.0)

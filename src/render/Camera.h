@@ -54,6 +54,9 @@ public:
 
     void fit(const BoundingBox& bb, bool animate = true);
     void setStandardView(StandardView v, bool animate = true);
+    /// Looks at `target` from the direction of standard view `v` at `distance`.
+    void viewFrom(StandardView v, const Vec3& target, double distance, bool animate = true);
+    static void viewAngles(StandardView v, double& yawDeg, double& pitchDeg);
 
     /// Advances transition animations. Returns true while animating.
     bool update(double dtSeconds);

@@ -1,8 +1,10 @@
+#include "app/ui/SketchUi.h"
 #include "app/ui/Ui.h"
 
 #include "app/AppContext.h"
 #include "model/features/FeaFeatures.h"
 #include "model/features/PartFeatures.h"
+#include "model/features/SketchFeatures.h"
 
 #include <algorithm>
 #include <cmath>
@@ -287,6 +289,15 @@ void drawFeatureEditor(AppContext& ctx, Feature& f)
 
     if (f.type() == model::StaticAnalysisFeature::kType)
         drawAnalysisPanel(ctx, f);
+    if (const auto* sk = dynamic_cast<const model::SketchFeature*>(&f)) {
+        if (ImGui::Button("Edit sketch"))
+            ctx.editSketch(f.id());
+        ImGui::SameLine();
+        ImGui::TextDisabled("%d curves, %d constraints", int(sk->sketch().geometry.size()),
+                            int(sk->sketch().constraints.size()));
+        if (f.state() == FeatureState::Ok)
+            ImGui::TextDisabled("%s", sk->lastSolve().message.c_str());
+    }
 
     // Group properties by their declared group, preserving declaration order.
     std::vector<std::string> groups;
@@ -384,6 +395,11 @@ void drawSubShapeInfo(AppContext& ctx)
 void drawProperties(AppContext& ctx)
 {
     if (!ImGui::Begin(kPropertiesWindow)) {
+        ImGui::End();
+        return;
+    }
+    if (ctx.sketchEdit.active()) {
+        drawSketchPanel(ctx);
         ImGui::End();
         return;
     }

@@ -400,14 +400,19 @@ json Document::toJson() const
         for (const auto& p : f->props().all())
             props[p.key] = valueToJson(p);
         const Color& c = f->color();
-        features.push_back({
+        json jf = {
             {"id", f->id()},
             {"type", f->type()},
             {"name", f->name()},
             {"visible", f->visible()},
             {"color", {round4(c.r), round4(c.g), round4(c.b), round4(c.a)}},
             {"props", std::move(props)},
-        });
+        };
+        json data;
+        f->saveData(data);
+        if (!data.is_null())
+            jf["data"] = std::move(data);
+        features.push_back(std::move(jf));
     }
     return {
         {"app", "CadForge"},
@@ -442,6 +447,8 @@ void Document::loadJson(const json& j)
             for (auto& p : f->props().all())
                 if (auto v = props->find(p.key); v != props->end())
                     valueFromJson(*v, p); // unknown keys are ignored (forward compatible)
+        if (auto data = jf.find("data"); data != jf.end())
+            f->loadData(*data);
         maxId = std::max(maxId, f->id());
         loaded.push_back(std::move(f));
     }

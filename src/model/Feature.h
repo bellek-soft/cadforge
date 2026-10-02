@@ -16,6 +16,8 @@
 #include "geom/Shape.h"
 #include "model/Property.h"
 
+#include <nlohmann/json_fwd.hpp>
+
 #include <memory>
 #include <string>
 #include <string_view>
@@ -72,6 +74,11 @@ public:
     /// Called by editors after the user changed property `key` (e.g. to apply a
     /// material preset). Returns true if other properties were modified.
     virtual bool onPropertyEdited(std::string_view key) { (void)key; return false; }
+    /// Feature-specific data that does not fit into properties (e.g. sketch
+    /// geometry). Stored under "data" in files and undo snapshots; leave `out`
+    /// null when there is nothing to store. Remember to include it in cacheSalt().
+    virtual void saveData(nlohmann::ordered_json& out) const { (void)out; }
+    virtual void loadData(const nlohmann::ordered_json& in) { (void)in; }
 
     // --- identity & appearance ---
     FeatureId id() const { return m_id; }

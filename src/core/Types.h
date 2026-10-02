@@ -6,6 +6,7 @@
 
 namespace cf {
 
+using Vec2 = glm::dvec2;
 using Vec3 = glm::dvec3;
 using Mat4 = glm::dmat4;
 
@@ -28,6 +29,22 @@ struct BoundingBox {
     Vec3 center() const { return (min + max) * 0.5; }
     Vec3 size() const { return max - min; }
     double diagonal() const { return valid() ? glm::length(max - min) : 0.0; }
+};
+
+/// A right-handed 2D coordinate frame in 3D space (sketch planes).
+/// normal = xDir x yDir.
+struct PlaneFrame {
+    Vec3 origin{0.0};
+    Vec3 xDir{1.0, 0.0, 0.0};
+    Vec3 yDir{0.0, 1.0, 0.0};
+
+    Vec3 normal() const { return glm::cross(xDir, yDir); }
+    Vec3 toWorld(const Vec2& p) const { return origin + xDir * p.x + yDir * p.y; }
+    Vec2 toLocal(const Vec3& w) const
+    {
+        const Vec3 d = w - origin;
+        return {glm::dot(d, xDir), glm::dot(d, yDir)};
+    }
 };
 
 } // namespace cf

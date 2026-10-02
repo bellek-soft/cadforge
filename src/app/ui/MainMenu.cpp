@@ -1,8 +1,10 @@
+#include "app/ui/SketchUi.h"
 #include "app/ui/Ui.h"
 
 #include "app/AppContext.h"
 #include "app/Commands.h"
 #include "model/features/PartFeatures.h"
+#include "model/features/SketchFeatures.h"
 
 #include <imgui_internal.h>
 
@@ -63,6 +65,7 @@ void drawMainMenu(AppContext& ctx, bool& quitRequested)
         ImGui::Separator();
         if (ImGui::MenuItem("Load Demo Scene")) cmd::loadDemo(ctx);
         if (ImGui::MenuItem("Load Analysis Demo")) cmd::loadAnalysisDemo(ctx);
+        if (ImGui::MenuItem("Load Sketch Demo")) cmd::loadSketchDemo(ctx);
         ImGui::Separator();
         if (ImGui::MenuItem("Quit", sc("Q").c_str())) quitRequested = true;
         ImGui::EndMenu();
@@ -86,6 +89,15 @@ void drawMainMenu(AppContext& ctx, bool& quitRequested)
 
     if (ImGui::BeginMenu("Create")) {
         createMenu(ctx);
+        ImGui::Separator();
+        if (ImGui::BeginMenu("Sketch")) {
+            if (ImGui::MenuItem("On XY plane")) ctx.createSketch(model::SketchFeature::XY);
+            if (ImGui::MenuItem("On XZ plane")) ctx.createSketch(model::SketchFeature::XZ);
+            if (ImGui::MenuItem("On YZ plane")) ctx.createSketch(model::SketchFeature::YZ);
+            ImGui::EndMenu();
+        }
+        if (ImGui::MenuItem("Extrude")) ctx.profileFeatureFromSelection("Part::Extrude");
+        if (ImGui::MenuItem("Revolve")) ctx.profileFeatureFromSelection("Part::Revolve");
         ImGui::EndMenu();
     }
 
@@ -189,10 +201,13 @@ void handleShortcuts(AppContext& ctx, bool& quitRequested)
         return ImGui::IsKeyPressed(key, false) && (io.KeyMods & ImGuiMod_Mask_) == mods;
     };
 
+    if (pressed(ImGuiMod_Ctrl | ImGuiKey_S)) cmd::save(ctx);
+    if (handleSketchShortcuts(ctx))
+        return; // sketch edit mode has its own keys
+
     // File / edit (ImGuiMod_Ctrl maps to Cmd on macOS).
     if (pressed(ImGuiMod_Ctrl | ImGuiKey_N)) cmd::newFile(ctx);
     if (pressed(ImGuiMod_Ctrl | ImGuiKey_O)) cmd::open(ctx);
-    if (pressed(ImGuiMod_Ctrl | ImGuiKey_S)) cmd::save(ctx);
     if (pressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S)) cmd::saveAs(ctx);
     if (pressed(ImGuiMod_Ctrl | ImGuiKey_I)) cmd::importStep(ctx);
     if (pressed(ImGuiMod_Ctrl | ImGuiKey_Q)) quitRequested = true;

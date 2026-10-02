@@ -4,6 +4,7 @@
 
 #include "app/FeaController.h"
 #include "app/SceneView.h"
+#include "app/SketchEditor.h"
 #include "app/Selection.h"
 #include "model/Document.h"
 #include "model/History.h"
@@ -52,6 +53,7 @@ public:
     render::PickFilter pickFilter = render::PickFilter::Object;
     GizmoMode gizmo = GizmoMode::Translate;
     SubShapeEditSession shapeEdit;
+    SketchEditor sketchEdit;      // active while a sketch is edited in place
     render::PickResult hover;     // what is under the cursor
     FeatureId hoverFeature = kNoFeature;
     model::RecomputeStats lastRecompute;
@@ -82,6 +84,14 @@ public:
     void booleanFromSelection(int op);              // BooleanFeature::Op
     void dressUpFromSelection(const std::string& type); // "Part::Fillet" / "Part::Chamfer"
     void deleteSelection();
+
+    // --- sketches ---
+    /// Creates a sketch on base plane `plane` (SketchFeature::Plane) and starts editing it.
+    void createSketch(int plane);
+    void editSketch(FeatureId id);
+    /// Creates "Part::Extrude" / "Part::Revolve" from the selected sketch. If a solid is
+    /// selected too, it becomes the target of a Join.
+    void profileFeatureFromSelection(const std::string& type);
     void setVisible(FeatureId id, bool visible);
     void selectAll();
 

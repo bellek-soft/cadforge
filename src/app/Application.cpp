@@ -169,9 +169,17 @@ int Application::run(const AppOptions& opt)
         cmd::loadDemo(*ctx);
     if (opt.feaDemo)
         cmd::loadAnalysisDemo(*ctx);
+    if (opt.sketchDemo)
+        cmd::loadSketchDemo(*ctx);
     if (!opt.openPath.empty())
         openAny(*ctx, opt.openPath);
-    if (!opt.demo && !opt.feaDemo && opt.openPath.empty())
+    if (opt.editSketch)
+        for (const auto& f : ctx->doc.features())
+            if (f->type() == "Sketch::Sketch") {
+                ctx->editSketch(f->id());
+                break;
+            }
+    if (!opt.demo && !opt.feaDemo && !opt.sketchDemo && opt.openPath.empty())
         ctx->status("Welcome to CadForge. Create a primitive or open File > Load Demo Scene.");
 
     // ---- main loop ----

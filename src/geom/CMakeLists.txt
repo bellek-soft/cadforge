@@ -3,6 +3,7 @@ add_library(cadforge_geom STATIC
     Shape.cpp
     Primitives.cpp
     Operations.cpp
+    Profile.cpp
     Tessellator.cpp
     ShapeIO.cpp)
 target_link_libraries(cadforge_geom
