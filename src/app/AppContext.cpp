@@ -406,9 +406,10 @@ void AppContext::createAnalysisFromSelection()
 
 void AppContext::createBoundaryFromSelection(const std::string& type)
 {
-    const char* what = type == model::FixedSupportFeature::kType ? "Fixed support"
-                       : type == model::ForceFeature::kType      ? "Force"
-                                                                 : "Pressure";
+    const char* what = type == model::FixedSupportFeature::kType     ? "Fixed support"
+                       : type == model::ForceFeature::kType          ? "Force"
+                       : type == model::MeshRefinementFeature::kType ? "Mesh refinement"
+                                                                     : "Pressure";
     FeatureId solid = kNoFeature;
     std::vector<int> faces;
     for (const auto& it : selection.items()) {

@@ -34,6 +34,9 @@ class Toolbar;
 void drawAnalysisToolbar(AppContext& ctx, Toolbar& tb);
 /// Study controls shown in the property panel of a static analysis.
 void drawAnalysisPanel(AppContext& ctx, model::Feature& analysis);
+/// Probe tool over the shown analysis surface: tooltip on hover, `clicked` pins a marker.
+/// Returns true if the probe consumed the click.
+bool analysisProbe(AppContext& ctx, const ImVec2& origin, const ImVec2& size, bool hovered, bool clicked);
 /// Viewport overlays: support/load glyphs, result legend, job progress.
 void drawAnalysisOverlay(AppContext& ctx, ImDrawList* dl, const ImVec2& origin, const ImVec2& size);
 

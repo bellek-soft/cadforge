@@ -119,6 +119,36 @@ VolumeMesh generateVolumeMesh(const MeshData& surface, const MeshSettings& setti
 
         NgMesh mesh;
         check(nglib::Ng_STL_MakeEdges(geom, mesh.m, &mp), "edge detection");
+        // Local refinement: restrict the mesh size at sample points covering the faces
+        // (after edge detection, which initialises the size field, before surface meshing).
+        for (const auto& local : settings.localSizes) {
+            if (!(local.size > 0.0))
+                continue;
+            const double hl = std::min(local.size, h);
+            for (int face : local.faces) {
+                if (face < 1 || face > int(surface.faceRanges.size()))
+                    continue;
+                const IndexRange& r = surface.faceRanges[std::size_t(face - 1)];
+                for (std::uint32_t t = r.first; t + 2 < r.first + r.count; t += 3) {
+                    Vec3 p[3];
+                    for (int k = 0; k < 3; ++k) {
+                        const auto v = surface.indices[t + std::uint32_t(k)];
+                        p[k] = Vec3(surface.positions[3 * v], surface.positions[3 * v + 1], surface.positions[3 * v + 2]);
+                    }
+                    // Barycentric grid with spacing ~ hl / 2 over the triangle.
+                    const double longest = std::max({glm::length(p[1] - p[0]), glm::length(p[2] - p[1]),
+                                                     glm::length(p[0] - p[2])});
+                    const int n = std::clamp(int(std::ceil(2.0 * longest / hl)), 1, 200);
+                    for (int i = 0; i <= n; ++i)
+                        for (int j = 0; i + j <= n; ++j) {
+                            const double a = double(i) / n, b = double(j) / n;
+                            const Vec3 q = p[0] + a * (p[1] - p[0]) + b * (p[2] - p[0]);
+                            double x[3] = {q.x, q.y, q.z};
+                            nglib::Ng_RestrictMeshSizePoint(mesh.m, x, hl);
+                        }
+                }
+            }
+        }
         check(nglib::Ng_STL_GenerateSurfaceMesh(geom, mesh.m, &mp), "surface meshing");
         check(nglib::Ng_GenerateVolumeMesh(mesh.m, &mp), "volume meshing");
         if (settings.order == ElementOrder::Quadratic)

@@ -30,6 +30,11 @@ struct SolveControl {
 /// (no supports, under-constrained model, bad material, ...).
 StaticResult solveStatic(const VolumeMesh& mesh, const StaticSetup& setup, const SolveControl& control = {});
 
+/// Natural frequencies and mode shapes: K phi = omega^2 M phi (consistent mass,
+/// shift-invert Lanczos via Spectra on a sparse LDL^T factorization).
+/// Throws FeaError like solveStatic.
+ModalResult solveModal(const VolumeMesh& mesh, const ModalSetup& setup, const SolveControl& control = {});
+
 /// Von Mises equivalent stress of a Voigt stress vector (xx, yy, zz, xy, yz, zx).
 double vonMises(const std::array<double, 6>& s);
 

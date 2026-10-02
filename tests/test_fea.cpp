@@ -2,6 +2,7 @@
 
 #include "TestHarness.h"
 
+#include "fea/Export.h"
 #include "fea/MeshUtils.h"
 #include "fea/Mesher.h"
 #include "fea/Post.h"
@@ -11,6 +12,9 @@
 #include "geom/Tessellator.h"
 
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 
 using namespace cf;
 
@@ -310,6 +314,26 @@ TEST(fea_document_end_to_end)
     const double eb = 100.0 * 1e6 / (3.0 * 68900.0 * (1e4 / 12.0));
     CHECK(maxAbsComponent(r, 2) > eb * 0.97 && maxAbsComponent(r, 2) < eb * 1.06);
 
+    // Local refinement + modal setup from the document.
+    auto* ref = doc.create(MeshRefinementFeature::kType);
+    ref->props().set(FeaBoundaryFeature::kAnalysis, a->id());
+    ref->props().set(FeaBoundaryFeature::kFaces, std::vector<int>{faceNear(surf, {0, 5, 5})});
+    ref->props().set(MeshRefinementFeature::kSize, 1.0);
+    doc.recompute();
+    CHECK(ref->state() == FeatureState::Ok);
+    const auto ms = meshSettingsOf(doc, a->id());
+    CHECK(ms.localSizes.size() == 1 && ms.localSizes[0].size == 1.0);
+    CHECK(buildStaticSetup(doc, a->id()).supports.size() == 1); // refinement is not a load
+    a->props().set(StaticAnalysisFeature::kAnalysisType, int(StaticAnalysisFeature::Modal));
+    a->props().set(StaticAnalysisFeature::kModes, 3);
+    doc.recompute();
+    CHECK(a->isModal());
+    const auto modalSetup = buildModalSetup(doc, a->id());
+    CHECK(modalSetup.modes == 3 && modalSetup.supports.size() == 1);
+    doc.remove(ref->id());
+    a->props().set(StaticAnalysisFeature::kAnalysisType, int(StaticAnalysisFeature::Static));
+    doc.recompute();
+
     // Invalid face index -> the load reports an error, setup refuses to build.
     force->props().set(FeaBoundaryFeature::kFaces, std::vector<int>{99});
     doc.recompute();
@@ -324,4 +348,134 @@ TEST(fea_document_end_to_end)
     doc2.recompute();
     CHECK(doc2.features().size() == 4);
     CHECK(doc2.toJson() == doc.toJson());
+}
+
+TEST(fea_modal_cantilever)
+{
+    // Cantilever 100 x 10 x 10 steel beam, clamped at x = 0. Euler-Bernoulli:
+    // f1 = 1.8751^2 / (2 pi) * sqrt(E I / (rho A L^4)) = 835.6 Hz (twice: y and z bending),
+    // second bending mode 6.267 x f1. Timoshenko effects lower the FE values slightly.
+    auto surf = fineSurface(geom::makeBox(100, 10, 10));
+    const int xmin = faceNear(surf, {0, 5, 5});
+    fea::MeshSettings ms;
+    ms.maxSize = 4.0;
+    ms.order = fea::ElementOrder::Quadratic;
+    const auto mesh = fea::generateVolumeMesh(surf, ms);
+    fea::ModalSetup setup;
+    setup.supports.push_back({{xmin}});
+    setup.modes = 5;
+    const auto r = fea::solveModal(mesh, setup);
+    const double E = 210000.0, I = 10.0 * 1000.0 / 12.0, rho = 7.85e-9, A = 100.0, L = 100.0;
+    const double f1 = 1.8751 * 1.8751 / (2.0 * 3.14159265358979) * std::sqrt(E * I / (rho * A * L * L * L * L));
+    std::printf("    %d equations, assembly %.2fs, solve %.2fs; f = ", r.equations, r.assemblySeconds, r.solveSeconds);
+    for (double f : r.frequencies)
+        std::printf("%.1f ", f);
+    std::printf("Hz (beam theory %.1f)\n", f1);
+    CHECK(r.frequencies.size() == 5);
+    CHECK(r.shapes.size() == 5 && r.shapes[0].size() == mesh.nodeCount());
+    CHECK(r.frequencies[0] > f1 * 0.95 && r.frequencies[0] < f1 * 1.03);
+    CHECK(r.frequencies[1] > f1 * 0.95 && r.frequencies[1] < f1 * 1.03);
+    for (std::size_t i = 1; i < r.frequencies.size(); ++i)
+        CHECK(r.frequencies[i] >= r.frequencies[i - 1] - 1e-6);
+    // Effective masses: the first bending pair carries ~61 % of the mass in y + z together.
+    const double m1 = r.effectiveMassRatio[0].y + r.effectiveMassRatio[0].z + r.effectiveMassRatio[1].y +
+                      r.effectiveMassRatio[1].z;
+    CHECK(m1 > 1.1 && m1 < 1.35); // ~0.61 per direction, two directions
+    CHECK(r.totalMass > 7.85e-5 * 0.9 && r.totalMass < 7.85e-5 * 1.05); // free DOFs only
+    double umax = 0.0;
+    for (const auto& u : r.shapes[0])
+        umax = std::max(umax, glm::length(u));
+    CHECK_NEAR(umax, 1.0, 1e-9);
+
+    // Linear tetrahedra are stiffer but must be in the right range.
+    ms.order = fea::ElementOrder::Linear;
+    ms.maxSize = 3.0;
+    const auto r4 = fea::solveModal(fea::generateVolumeMesh(surf, ms), setup);
+    CHECK(r4.frequencies[0] > f1 * 0.95 && r4.frequencies[0] < f1 * 1.5);
+}
+
+TEST(fea_local_refinement)
+{
+    auto surf = fineSurface(geom::makeBox(40, 20, 10));
+    const int top = faceNear(surf, {20, 10, 10});
+    fea::MeshSettings ms;
+    ms.maxSize = 6.0;
+    ms.order = fea::ElementOrder::Linear;
+    const auto coarse = fea::generateVolumeMesh(surf, ms);
+    ms.localSizes.push_back({{top}, 1.5});
+    const auto fine = fea::generateVolumeMesh(surf, ms);
+    auto meanEdge = [](const fea::VolumeMesh& m, int face) {
+        double sum = 0.0;
+        int n = 0;
+        for (std::size_t t = 0; t < m.boundaryFaceCount(); ++t) {
+            if (m.boundaryFaceIds[t] != face)
+                continue;
+            const int* v = &m.boundaryFaces[t * 3];
+            sum += glm::length(m.nodes[std::size_t(v[0])] - m.nodes[std::size_t(v[1])]);
+            ++n;
+        }
+        return n ? sum / n : 0.0;
+    };
+    const int bottom = faceNear(surf, {20, 10, 0});
+    std::printf("    elements %zu -> %zu, top edge %.2f -> %.2f mm, bottom %.2f mm\n", coarse.elementCount(),
+                fine.elementCount(), meanEdge(coarse, top), meanEdge(fine, top), meanEdge(fine, bottom));
+    CHECK(fine.elementCount() > coarse.elementCount() * 3);
+    CHECK(meanEdge(fine, top) < 2.5);
+    CHECK(meanEdge(fine, bottom) > meanEdge(fine, top) * 1.5);
+    CHECK_NEAR(fine.volume(), 8000.0, 1e-6 * 8000.0);
+}
+
+TEST(fea_section_probe_and_vtk)
+{
+    auto surf = fineSurface(geom::makeBox(100, 10, 10));
+    const int xmin = faceNear(surf, {0, 5, 5}), xmax = faceNear(surf, {100, 5, 5});
+    fea::MeshSettings ms;
+    ms.maxSize = 4.0;
+    const auto mesh = fea::generateVolumeMesh(surf, ms);
+    fea::StaticSetup setup;
+    setup.supports.push_back({{xmin}});
+    setup.forces.push_back({{xmax}, Vec3(0, 0, -100.0)});
+    const auto r = fea::solveStatic(mesh, setup);
+
+    fea::SurfaceOptions opt;
+    opt.field = fea::ResultField::VonMises;
+    const MeshData full = fea::resultSurface(mesh, &r, opt);
+    opt.section = true;
+    opt.sectionNormal = {1, 0, 0};
+    opt.sectionOffset = 50.0;
+    const MeshData cut = fea::resultSurface(mesh, &r, opt);
+    CHECK(cut.bounds.max.x <= full.bounds.max.x);
+    double maxX = -1e9;
+    for (std::uint32_t v : cut.indices)
+        maxX = std::max(maxX, double(cut.positions[3 * v]));
+    CHECK(maxX < 50.0 + 1e-3);
+    CHECK(cut.scalars.size() == cut.vertexCount());
+
+    // Probe the cap straight on: the section at x = 50 carries M = 5000 Nmm -> sigma_max = 30 MPa
+    // at z = 0 / 10 and ~0 at the neutral axis.
+    fea::ProbeHit hit;
+    CHECK(fea::probeSurface(cut, {200, 5, 9.5}, {-1, 0, 0}, hit));
+    CHECK_NEAR(hit.point.x, 50.0, 1e-3);
+    CHECK(hit.face == 0);
+    CHECK(hit.value > 18.0 && hit.value < 40.0);
+    CHECK(fea::probeSurface(cut, {200, 5, 5.0}, {-1, 0, 0}, hit));
+    CHECK(hit.value < 6.0);
+    CHECK(!fea::probeSurface(cut, {200, 50, 5.0}, {-1, 0, 0}, hit));
+
+    // VTK export
+    const auto path = (std::filesystem::temp_directory_path() / "cadforge_test.vtu").string();
+    fea::ModalResult modal;
+    modal.frequencies = {123.0};
+    modal.shapes = {std::vector<Vec3>(mesh.nodeCount(), Vec3(0, 0, 1))};
+    fea::writeVtu(path, mesh, &r, &modal);
+    std::ifstream in(path);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    const std::string text = ss.str();
+    CHECK(text.find("NumberOfPoints=\"" + std::to_string(mesh.nodeCount()) + "\"") != std::string::npos);
+    CHECK(text.find("NumberOfCells=\"" + std::to_string(mesh.elementCount()) + "\"") != std::string::npos);
+    CHECK(text.find("Name=\"Displacement\"") != std::string::npos);
+    CHECK(text.find("Mode 1 (123.00 Hz)") != std::string::npos);
+    CHECK(text.find(mesh.nodesPerElement == 10 ? "24 24" : "10 10") != std::string::npos);
+    std::filesystem::remove(path);
 }

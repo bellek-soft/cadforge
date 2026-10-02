@@ -5,6 +5,9 @@
 #include <Eigen/Sparse>
 #include <Eigen/SparseCholesky>
 
+#include <Spectra/MatOp/SparseSymMatProd.h>
+#include <Spectra/SymGEigsShiftSolver.h>
+
 #include <amgcl/adapter/crs_tuple.hpp>
 #include <amgcl/amg.hpp>
 #include <amgcl/backend/builtin.hpp>
@@ -182,45 +185,23 @@ Vec3 triangleAreaNormal(const VolumeMesh& mesh, std::size_t tri)
     return 0.5 * glm::cross(b - a, c - a); // outward normal * area
 }
 
-} // namespace
 
-double vonMises(const std::array<double, 6>& s)
+struct Equations {
+    std::vector<char> fixed; // per DOF
+    std::vector<int> eq;     // DOF -> equation (-1 = fixed)
+    int count = 0;
+};
+
+/// Fixes the supported DOFs, checks that all rigid body motions are prevented
+/// and numbers the free DOFs.
+Equations numberEquations(const VolumeMesh& mesh, const std::vector<FixedSupport>& supports)
 {
-    const double a = s[0] - s[1], b = s[1] - s[2], c = s[2] - s[0];
-    return std::sqrt(0.5 * (a * a + b * b + c * c) + 3.0 * (s[3] * s[3] + s[4] * s[4] + s[5] * s[5]));
-}
-
-StaticResult solveStatic(const VolumeMesh& mesh, const StaticSetup& setup, const SolveControl& ctl)
-{
-    const auto report = [&](const std::string& stage, double p) {
-        if (ctl.progress)
-            ctl.progress(stage, p);
-    };
-    const auto checkCancel = [&] {
-        if (ctl.cancel && ctl.cancel->load())
-            throw FeaError("Cancelled");
-    };
-
-    const Material& mat = setup.material;
-    if (!(mat.youngsModulus > 0))
-        throw FeaError("Young's modulus must be positive");
-    if (!(mat.poissonRatio > -1.0 && mat.poissonRatio < 0.5))
-        throw FeaError("Poisson's ratio must be in (-1, 0.5)");
-    if (mesh.empty())
-        throw FeaError("The mesh is empty");
-    if (setup.supports.empty())
-        throw FeaError("Add at least one fixed support: the model can move freely");
-
-    const int nen = mesh.nodesPerElement;
     const std::size_t nNodes = mesh.nodeCount();
-    const std::size_t nElem = mesh.elementCount();
     const std::size_t nDof = 3 * nNodes;
-    const Mat6 D = elasticity(mat);
-    StaticResult res;
-
-    // ---- constraints -> equation numbering ----
-    std::vector<char> fixed(nDof, 0);
-    for (const auto& s : setup.supports) {
+    Equations out;
+    std::vector<char>& fixed = out.fixed;
+    fixed.assign(nDof, 0);
+    for (const auto& s : supports) {
         const auto nodes = mesh.nodesOnFaces(s.faces);
         if (nodes.empty())
             throw FeaError("A fixed support references faces that are not part of the mesh");
@@ -270,14 +251,181 @@ StaticResult solveStatic(const VolumeMesh& mesh, const StaticSetup& setup, const
                            "rotate): fix more faces or more directions");
     }
 
-    std::vector<int> eq(nDof, -1);
-    int nEq = 0;
+    out.eq.assign(nDof, -1);
     for (std::size_t d = 0; d < nDof; ++d)
         if (!fixed[d])
-            eq[d] = nEq++;
-    res.equations = nEq;
-    if (nEq == 0)
+            out.eq[d] = out.count++;
+    if (out.count == 0)
         throw FeaError("Every node is fixed: nothing to solve");
+    return out;
+}
+
+
+/// Assembles the lower triangle of a global matrix over the free equations.
+/// `element(conn, Me)` fills the (3 nen x 3 nen) element matrix.
+template <typename ElementFn, typename ProgressFn>
+SpMat assembleLower(const VolumeMesh& mesh, const std::vector<int>& eq, int nEq, ElementFn&& element,
+                    ProgressFn&& progress)
+{
+    const int nen = mesh.nodesPerElement;
+    const std::size_t nNodes = mesh.nodeCount();
+    const std::size_t nElem = mesh.elementCount();
+    std::vector<std::vector<int>> adjacency(nNodes);
+    for (std::size_t e = 0; e < nElem; ++e) {
+        const int* conn = &mesh.elements[e * std::size_t(nen)];
+        for (int a = 0; a < nen; ++a)
+            for (int b = 0; b < nen; ++b)
+                adjacency[std::size_t(conn[a])].push_back(conn[b]);
+    }
+    for (auto& adj : adjacency) {
+        std::sort(adj.begin(), adj.end());
+        adj.erase(std::unique(adj.begin(), adj.end()), adj.end());
+    }
+    progress(0.0);
+
+    SpMat K(nEq, nEq);
+    {
+        Eigen::VectorXi colNnz = Eigen::VectorXi::Zero(nEq);
+        for (std::size_t n = 0; n < nNodes; ++n)
+            for (int c = 0; c < 3; ++c) {
+                const int col = eq[3 * n + std::size_t(c)];
+                if (col < 0)
+                    continue;
+                int cnt = 0;
+                for (int m : adjacency[n])
+                    for (int r = 0; r < 3; ++r)
+                        cnt += (eq[std::size_t(3 * m + r)] >= col);
+                colNnz(col) = cnt;
+            }
+        K.reserve(colNnz);
+        // Insert the pattern in sorted order (cheap), values are added below.
+        for (std::size_t n = 0; n < nNodes; ++n)
+            for (int c = 0; c < 3; ++c) {
+                const int col = eq[3 * n + std::size_t(c)];
+                if (col < 0)
+                    continue;
+                for (int m : adjacency[n])
+                    for (int r = 0; r < 3; ++r) {
+                        const int row = eq[std::size_t(3 * m + r)];
+                        if (row >= col)
+                            K.insert(row, col) = 0.0;
+                    }
+            }
+    }
+    adjacency.clear();
+    adjacency.shrink_to_fit();
+
+    Eigen::Matrix<double, 30, 30> Me;
+    std::vector<int> dofEq(std::size_t(3 * nen));
+    for (std::size_t e = 0; e < nElem; ++e) {
+        const int* conn = &mesh.elements[e * std::size_t(nen)];
+        element(conn, Me);
+        for (int a = 0; a < nen; ++a)
+            for (int c = 0; c < 3; ++c)
+                dofEq[std::size_t(3 * a + c)] = eq[std::size_t(3 * conn[a] + c)];
+        for (int j = 0; j < 3 * nen; ++j) {
+            const int col = dofEq[std::size_t(j)];
+            if (col < 0)
+                continue;
+            for (int i = 0; i < 3 * nen; ++i) {
+                const int row = dofEq[std::size_t(i)];
+                if (row >= col)
+                    K.coeffRef(row, col) += Me(i, j);
+            }
+        }
+        if ((e & 4095) == 0)
+            progress(double(e) / double(std::max<std::size_t>(nElem, 1)));
+    }
+    K.makeCompressed();
+    return K;
+}
+
+/// Consistent mass matrix of a (straight-sided) Tet4 / Tet10 element.
+void elementMass(const VolumeMesh& mesh, const int* conn, int nen, double density,
+                 Eigen::Matrix<double, 30, 30>& Me)
+{
+    Me.setZero();
+    const Vec3& p0 = mesh.nodes[std::size_t(conn[0])];
+    const double V = std::abs(glm::dot(mesh.nodes[std::size_t(conn[1])] - p0,
+                                       glm::cross(mesh.nodes[std::size_t(conn[2])] - p0,
+                                                  mesh.nodes[std::size_t(conn[3])] - p0))) / 6.0;
+    double m[10][10];
+    if (nen == 4) {
+        for (int i = 0; i < 4; ++i)
+            for (int j = 0; j < 4; ++j)
+                m[i][j] = (i == j ? 2.0 : 1.0) / 20.0;
+    } else {
+        // Exact integrals of N_i N_j for the quadratic tetrahedron (times 1/V), see
+        // Zienkiewicz & Taylor: corner/corner 6|1, corner/mid-edge -4 (edge touches
+        // the corner) | -6, mid/mid 32 | 16 (edges share a corner) | 8 (opposite).
+        static const int e[6][2] = {{0, 1}, {1, 2}, {2, 0}, {0, 3}, {1, 3}, {2, 3}};
+        auto touches = [](int edge, int corner) { return e[edge][0] == corner || e[edge][1] == corner; };
+        for (int i = 0; i < 10; ++i)
+            for (int j = 0; j < 10; ++j) {
+                double v;
+                if (i < 4 && j < 4)
+                    v = i == j ? 6.0 : 1.0;
+                else if (i < 4 || j < 4) {
+                    const int c = i < 4 ? i : j, ed = (i < 4 ? j : i) - 4;
+                    v = touches(ed, c) ? -4.0 : -6.0;
+                } else if (i == j) {
+                    v = 32.0;
+                } else {
+                    const int a = i - 4, b = j - 4;
+                    const bool share = touches(a, e[b][0]) || touches(a, e[b][1]);
+                    v = share ? 16.0 : 8.0;
+                }
+                m[i][j] = v / 420.0;
+            }
+    }
+    for (int a = 0; a < nen; ++a)
+        for (int b = 0; b < nen; ++b)
+            for (int c = 0; c < 3; ++c)
+                Me(3 * a + c, 3 * b + c) = density * V * m[a][b];
+}
+
+} // namespace
+
+double vonMises(const std::array<double, 6>& s)
+{
+    const double a = s[0] - s[1], b = s[1] - s[2], c = s[2] - s[0];
+    return std::sqrt(0.5 * (a * a + b * b + c * c) + 3.0 * (s[3] * s[3] + s[4] * s[4] + s[5] * s[5]));
+}
+
+StaticResult solveStatic(const VolumeMesh& mesh, const StaticSetup& setup, const SolveControl& ctl)
+{
+    const auto report = [&](const std::string& stage, double p) {
+        if (ctl.progress)
+            ctl.progress(stage, p);
+    };
+    const auto checkCancel = [&] {
+        if (ctl.cancel && ctl.cancel->load())
+            throw FeaError("Cancelled");
+    };
+
+    const Material& mat = setup.material;
+    if (!(mat.youngsModulus > 0))
+        throw FeaError("Young's modulus must be positive");
+    if (!(mat.poissonRatio > -1.0 && mat.poissonRatio < 0.5))
+        throw FeaError("Poisson's ratio must be in (-1, 0.5)");
+    if (mesh.empty())
+        throw FeaError("The mesh is empty");
+    if (setup.supports.empty())
+        throw FeaError("Add at least one fixed support: the model can move freely");
+
+    const int nen = mesh.nodesPerElement;
+    const std::size_t nNodes = mesh.nodeCount();
+    const std::size_t nElem = mesh.elementCount();
+    const std::size_t nDof = 3 * nNodes;
+    const Mat6 D = elasticity(mat);
+    StaticResult res;
+
+    // ---- constraints -> equation numbering ----
+    const Equations eqs = numberEquations(mesh, setup.supports);
+    const std::vector<char>& fixed = eqs.fixed;
+    const std::vector<int>& eq = eqs.eq;
+    const int nEq = eqs.count;
+    res.equations = nEq;
 
     // ---- load vector ----
     report("Applying loads", 0.0);
@@ -323,81 +471,17 @@ StaticResult solveStatic(const VolumeMesh& mesh, const StaticSetup& setup, const
     for (std::size_t n = 0; n < nNodes; ++n)
         res.appliedLoad += Vec3(f(Eigen::Index(3 * n)), f(Eigen::Index(3 * n + 1)), f(Eigen::Index(3 * n + 2)));
 
-    // ---- sparsity pattern (lower triangle of the free equations) ----
+    // ---- stiffness matrix (lower triangle of the free equations) ----
     const auto t0 = Clock::now();
     report("Assembling stiffness matrix", 0.05);
-    std::vector<std::vector<int>> adjacency(nNodes);
-    for (std::size_t e = 0; e < nElem; ++e) {
-        const int* conn = &mesh.elements[e * std::size_t(nen)];
-        for (int a = 0; a < nen; ++a)
-            for (int b = 0; b < nen; ++b)
-                adjacency[std::size_t(conn[a])].push_back(conn[b]);
-    }
-    for (auto& adj : adjacency) {
-        std::sort(adj.begin(), adj.end());
-        adj.erase(std::unique(adj.begin(), adj.end()), adj.end());
-    }
-    checkCancel();
-
-    SpMat K(nEq, nEq);
-    {
-        Eigen::VectorXi colNnz = Eigen::VectorXi::Zero(nEq);
-        for (std::size_t n = 0; n < nNodes; ++n)
-            for (int c = 0; c < 3; ++c) {
-                const int col = eq[3 * n + std::size_t(c)];
-                if (col < 0)
-                    continue;
-                int cnt = 0;
-                for (int m : adjacency[n])
-                    for (int r = 0; r < 3; ++r) {
-                        const int row = eq[std::size_t(3 * m + r)];
-                        cnt += (row >= col);
-                    }
-                colNnz(col) = cnt;
-            }
-        K.reserve(colNnz);
-        // Insert the pattern in sorted order (cheap), values are added below.
-        for (std::size_t n = 0; n < nNodes; ++n)
-            for (int c = 0; c < 3; ++c) {
-                const int col = eq[3 * n + std::size_t(c)];
-                if (col < 0)
-                    continue;
-                for (int m : adjacency[n])
-                    for (int r = 0; r < 3; ++r) {
-                        const int row = eq[std::size_t(3 * m + r)];
-                        if (row >= col)
-                            K.insert(row, col) = 0.0;
-                    }
-            }
-    }
-    adjacency.clear();
-    adjacency.shrink_to_fit();
-
-    // ---- assembly ----
-    Eigen::Matrix<double, 30, 30> Ke;
-    std::vector<int> dofEq(std::size_t(3 * nen));
-    for (std::size_t e = 0; e < nElem; ++e) {
-        const int* conn = &mesh.elements[e * std::size_t(nen)];
-        elementStiffness(mesh, conn, nen, D, Ke);
-        for (int a = 0; a < nen; ++a)
-            for (int c = 0; c < 3; ++c)
-                dofEq[std::size_t(3 * a + c)] = eq[std::size_t(3 * conn[a] + c)];
-        for (int j = 0; j < 3 * nen; ++j) {
-            const int col = dofEq[std::size_t(j)];
-            if (col < 0)
-                continue;
-            for (int i = 0; i < 3 * nen; ++i) {
-                const int row = dofEq[std::size_t(i)];
-                if (row >= col)
-                    K.coeffRef(row, col) += Ke(i, j);
-            }
-        }
-        if ((e & 4095) == 0) {
-            checkCancel();
-            report("Assembling stiffness matrix", 0.05 + 0.25 * double(e) / double(nElem));
-        }
-    }
-    K.makeCompressed();
+    SpMat K = assembleLower(mesh, eq, nEq,
+                            [&](const int* conn, Eigen::Matrix<double, 30, 30>& Ke) {
+                                elementStiffness(mesh, conn, nen, D, Ke);
+                            },
+                            [&](double t) {
+                                checkCancel();
+                                report("Assembling stiffness matrix", 0.05 + 0.25 * t);
+                            });
     Eigen::VectorXd fFree(nEq);
     for (std::size_t d = 0; d < nDof; ++d)
         if (eq[d] >= 0)
@@ -526,6 +610,7 @@ StaticResult solveStatic(const VolumeMesh& mesh, const StaticSetup& setup, const
     Eigen::VectorXd fInt = Eigen::VectorXd::Zero(Eigen::Index(nDof));
     Eigen::Matrix<double, 6, 30> B;
     Eigen::Matrix<double, 30, 1> ue;
+    Eigen::Matrix<double, 30, 30> Ke;
     double N[10];
     const auto& natural = nodeNaturalCoords();
     for (std::size_t e = 0; e < nElem; ++e) {
@@ -562,6 +647,148 @@ StaticResult solveStatic(const VolumeMesh& mesh, const StaticSetup& setup, const
         if (fixed[d])
             res.reaction[int(d % 3)] += fInt(Eigen::Index(d)) - f(Eigen::Index(d));
 
+    report("Done", 1.0);
+    return res;
+}
+
+namespace {
+
+/// Spectra operator y = (K - sigma M)^-1 x using a sparse LDL^T factorization.
+class ShiftInvertLdlt {
+public:
+    using Scalar = double;
+    ShiftInvertLdlt(const SpMat& K, const SpMat& M) : m_K(K), m_M(M) {}
+    Eigen::Index rows() const { return m_K.rows(); }
+    Eigen::Index cols() const { return m_K.cols(); }
+    void set_shift(double sigma)
+    {
+        SpMat A = m_K;
+        if (sigma != 0.0)
+            A -= sigma * m_M;
+        m_ldlt.compute(A);
+        if (m_ldlt.info() != Eigen::Success)
+            throw FeaError("The stiffness matrix is singular: the model is not sufficiently supported");
+    }
+    void perform_op(const double* x, double* y) const
+    {
+        Eigen::Map<Eigen::VectorXd>(y, rows()) = m_ldlt.solve(Eigen::Map<const Eigen::VectorXd>(x, rows()));
+    }
+
+private:
+    const SpMat& m_K;
+    const SpMat& m_M;
+    Eigen::SimplicialLDLT<SpMat, Eigen::Lower> m_ldlt;
+};
+
+} // namespace
+
+ModalResult solveModal(const VolumeMesh& mesh, const ModalSetup& setup, const SolveControl& ctl)
+{
+    const auto report = [&](const std::string& stage, double p) {
+        if (ctl.progress)
+            ctl.progress(stage, p);
+    };
+    const auto checkCancel = [&] {
+        if (ctl.cancel && ctl.cancel->load())
+            throw FeaError("Cancelled");
+    };
+    const Material& mat = setup.material;
+    if (!(mat.youngsModulus > 0))
+        throw FeaError("Young's modulus must be positive");
+    if (!(mat.poissonRatio > -1.0 && mat.poissonRatio < 0.5))
+        throw FeaError("Poisson's ratio must be in (-1, 0.5)");
+    if (!(mat.density > 0))
+        throw FeaError("A modal analysis needs a positive density");
+    if (mesh.empty())
+        throw FeaError("The mesh is empty");
+    if (setup.supports.empty())
+        throw FeaError("Add at least one fixed support (free-free modal analysis is not supported yet)");
+
+    const int nen = mesh.nodesPerElement;
+    const std::size_t nNodes = mesh.nodeCount();
+    const Mat6 D = elasticity(mat);
+    ModalResult res;
+
+    const Equations eqs = numberEquations(mesh, setup.supports);
+    const int nEq = eqs.count;
+    res.equations = nEq;
+
+    const auto t0 = Clock::now();
+    report("Assembling stiffness matrix", 0.02);
+    const SpMat K = assembleLower(
+        mesh, eqs.eq, nEq, [&](const int* conn, Eigen::Matrix<double, 30, 30>& Ke) { elementStiffness(mesh, conn, nen, D, Ke); },
+        [&](double t) {
+            checkCancel();
+            report("Assembling stiffness matrix", 0.02 + 0.18 * t);
+        });
+    report("Assembling mass matrix", 0.2);
+    const SpMat M = assembleLower(
+        mesh, eqs.eq, nEq,
+        [&](const int* conn, Eigen::Matrix<double, 30, 30>& Me) { elementMass(mesh, conn, nen, mat.density, Me); },
+        [&](double t) {
+            checkCancel();
+            report("Assembling mass matrix", 0.2 + 0.1 * t);
+        });
+    res.assemblySeconds = seconds(t0);
+
+    const int nev = std::clamp(setup.modes, 1, std::max(1, nEq - 2));
+    if (nEq < 3)
+        throw FeaError("The model has too few free degrees of freedom for a modal analysis");
+    const int ncv = std::min(nEq, std::max(2 * nev + 1, 20));
+
+    const auto t1 = Clock::now();
+    report("Factorizing (shift-invert)", 0.35);
+    using BOp = Spectra::SparseSymMatProd<double, Eigen::Lower>;
+    ShiftInvertLdlt op(K, M);
+    BOp bop(M);
+    // Shift 0: the factorization of K itself; the lowest frequencies converge first.
+    Spectra::SymGEigsShiftSolver<ShiftInvertLdlt, BOp, Spectra::GEigsMode::ShiftInvert> solver(op, bop, nev, ncv, 0.0);
+    checkCancel();
+    report("Computing eigenvalues", 0.7);
+    solver.init();
+    const Eigen::Index nconv = solver.compute(Spectra::SortRule::LargestMagn, 1000, 1e-10, Spectra::SortRule::SmallestAlge);
+    if (solver.info() != Spectra::CompInfo::Successful || nconv < 1)
+        throw FeaError("The eigenvalue solver did not converge");
+    const Eigen::VectorXd lambda = solver.eigenvalues();
+    const Eigen::MatrixXd phi = solver.eigenvectors(); // M-orthonormal
+    res.solveSeconds = seconds(t1);
+    res.solver = "Shift-invert Lanczos (Spectra) + sparse LDL^T";
+
+    // Rigid body translation vectors of the free DOFs -> effective modal masses.
+    report("Mode shapes", 0.95);
+    const auto Mfull = M.selfadjointView<Eigen::Lower>();
+    Eigen::MatrixXd R = Eigen::MatrixXd::Zero(nEq, 3);
+    for (std::size_t d = 0; d < 3 * nNodes; ++d)
+        if (eqs.eq[d] >= 0)
+            R(eqs.eq[d], Eigen::Index(d % 3)) = 1.0;
+    const Eigen::MatrixXd MR = Mfull * R;
+    const Eigen::Vector3d total(R.col(0).dot(MR.col(0)), R.col(1).dot(MR.col(1)), R.col(2).dot(MR.col(2)));
+    res.totalMass = total.maxCoeff();
+
+    // Spectra returns the requested order (SmallestAlge: ascending).
+    for (Eigen::Index k = 0; k < lambda.size(); ++k) {
+        const double w2 = std::max(lambda(k), 0.0);
+        res.frequencies.push_back(std::sqrt(w2) / (2.0 * 3.14159265358979323846));
+        std::vector<Vec3> shape(nNodes, Vec3(0.0));
+        double umax = 0.0;
+        for (std::size_t n = 0; n < nNodes; ++n) {
+            for (int c = 0; c < 3; ++c) {
+                const int q = eqs.eq[3 * n + std::size_t(c)];
+                if (q >= 0)
+                    shape[n][c] = phi(q, k);
+            }
+            umax = std::max(umax, glm::length(shape[n]));
+        }
+        if (umax > 0.0)
+            for (auto& u : shape)
+                u /= umax;
+        res.shapes.push_back(std::move(shape));
+        const Eigen::Vector3d gamma = MR.transpose() * phi.col(k); // participation factors
+        Vec3 ratio(0.0);
+        for (int c = 0; c < 3; ++c)
+            ratio[c] = total(c) > 0.0 ? gamma(c) * gamma(c) / total(c) : 0.0;
+        res.effectiveMassRatio.push_back(ratio);
+    }
     report("Done", 1.0);
     return res;
 }

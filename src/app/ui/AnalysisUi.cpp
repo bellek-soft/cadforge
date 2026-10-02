@@ -5,6 +5,7 @@
 #include "app/ui/Ui.h"
 
 #include "app/AppContext.h"
+#include "app/FileDialogs.h"
 #include "fea/Mesher.h"
 #include "fea/Post.h"
 #include "model/features/FeaFeatures.h"
@@ -42,6 +43,27 @@ void solveCommand(AppContext& ctx)
         ctx.status("Solve: select the analysis to solve", true);
     else
         ctx.solveAnalysis(a);
+}
+
+void exportVtkCommand(AppContext& ctx, FeatureId analysis)
+{
+    ctx.requestFile({FileRequest::Kind::Save, "Export results (VTK)", {"VTK unstructured grid (*.vtu)", "*.vtu"},
+                     ".vtu", [&ctx, analysis](const std::string& path) {
+                         std::string err;
+                         if (ctx.fea.exportVtu(analysis, path, err))
+                             ctx.status("Exported " + path + " (open it in ParaView)");
+                         else
+                             ctx.status("VTK export failed: " + err, true);
+                     }});
+}
+
+const std::vector<fea::ResultField>& fieldsFor(const AnalysisRuntime* rt)
+{
+    static const std::vector<fea::ResultField> all = {
+        fea::ResultField::VonMises, fea::ResultField::DisplacementMagnitude, fea::ResultField::DisplacementX,
+        fea::ResultField::DisplacementY, fea::ResultField::DisplacementZ};
+    static const std::vector<fea::ResultField> modal(all.begin() + 1, all.end());
+    return rt && rt->modal ? modal : all;
 }
 
 ImU32 toU32(const glm::vec3& c, float a = 1.0f)
@@ -102,6 +124,8 @@ void drawAnalysisToolbar(AppContext& ctx, Toolbar& tb)
         ctx.createBoundaryFromSelection(model::ForceFeature::kType);
     if (tb.button("Pressure", "Pressure on the selected faces"))
         ctx.createBoundaryFromSelection(model::PressureFeature::kType);
+    if (tb.button("Refine", "Smaller elements on the selected faces"))
+        ctx.createBoundaryFromSelection(model::MeshRefinementFeature::kType);
     ImGui::BeginDisabled(ctx.fea.busy());
     if (tb.button("Solve", "Mesh and solve the analysis (F5)"))
         solveCommand(ctx);
@@ -113,7 +137,7 @@ void drawAnalysisMenu(AppContext& ctx)
     if (!ImGui::BeginMenu("Analysis"))
         return;
     auto& fea = ctx.fea;
-    if (ImGui::MenuItem("New Static Analysis"))
+    if (ImGui::MenuItem("New Analysis"))
         ctx.createAnalysisFromSelection();
     ImGui::Separator();
     if (ImGui::MenuItem("Fixed Support"))
@@ -122,6 +146,8 @@ void drawAnalysisMenu(AppContext& ctx)
         ctx.createBoundaryFromSelection(model::ForceFeature::kType);
     if (ImGui::MenuItem("Pressure"))
         ctx.createBoundaryFromSelection(model::PressureFeature::kType);
+    if (ImGui::MenuItem("Mesh Refinement"))
+        ctx.createBoundaryFromSelection(model::MeshRefinementFeature::kType);
     ImGui::Separator();
     const FeatureId a = commandAnalysis(ctx);
     if (ImGui::MenuItem("Mesh", nullptr, false, a != kNoFeature && !fea.busy()))
@@ -130,7 +156,12 @@ void drawAnalysisMenu(AppContext& ctx)
         ctx.solveAnalysis(a);
     if (ImGui::MenuItem("Cancel", nullptr, false, fea.busy()))
         fea.cancel();
+    if (ImGui::MenuItem("Export Results (VTK)...", nullptr, false,
+                        a != kNoFeature && fea.runtime(a) && fea.runtime(a)->mesh))
+        exportVtkCommand(ctx, a);
     ImGui::Separator();
+    ImGui::MenuItem("Section View", nullptr, &fea.section);
+    ImGui::MenuItem("Probe", nullptr, &fea.probeMode);
     ImGui::MenuItem("Show Results", nullptr, &fea.showResults);
     ImGui::MenuItem("Show Mesh Edges", nullptr, &fea.showMeshEdges);
     if (ImGui::BeginMenu("Result Field")) {
@@ -192,7 +223,42 @@ void drawAnalysisPanel(AppContext& ctx, model::Feature& f)
         ImGui::TextDisabled("Mesher: %s", fea::mesherName().c_str());
     }
 
-    if (rt && rt->result) {
+    if (rt && rt->result && rt->modal) {
+        const auto& m = *rt->modal;
+        if (!fea.resultUpToDate(ctx.doc, id))
+            ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "Results are outdated - solve again");
+        ImGui::TextDisabled("%d equations, assembly %.2f s, eigen solve %.2f s", m.equations, m.assemblySeconds,
+                            m.solveSeconds);
+        if (ImGui::BeginTable("##modes", 5, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg |
+                                                ImGuiTableFlags_BordersInnerV)) {
+            ImGui::TableSetupColumn("Mode");
+            ImGui::TableSetupColumn("Freq. [Hz]");
+            ImGui::TableSetupColumn("Mx %");
+            ImGui::TableSetupColumn("My %");
+            ImGui::TableSetupColumn("Mz %");
+            ImGui::TableHeadersRow();
+            for (std::size_t i = 0; i < m.frequencies.size(); ++i) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                char label[32];
+                std::snprintf(label, sizeof(label), "%zu", i + 1);
+                if (ImGui::Selectable(label, rt->mode == int(i), ImGuiSelectableFlags_SpanAllColumns)) {
+                    fea.selectMode(id, int(i));
+                    fea.shownAnalysis = id;
+                    fea.showResults = true;
+                }
+                ImGui::TableSetColumnIndex(1);
+                ImGui::Text("%.5g", m.frequencies[i]);
+                const Vec3& r = m.effectiveMassRatio[i];
+                for (int c = 0; c < 3; ++c) {
+                    ImGui::TableSetColumnIndex(2 + c);
+                    ImGui::Text("%.1f", r[c] * 100.0);
+                }
+            }
+            ImGui::EndTable();
+        }
+        ImGui::TextDisabled("Effective mass in %% of the free mass (%.4g t)", m.totalMass);
+    } else if (rt && rt->result) {
         const auto& r = *rt->result;
         if (!fea.resultUpToDate(ctx.doc, id))
             ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "Results are outdated - solve again");
@@ -238,10 +304,10 @@ void drawAnalysisPanel(AppContext& ctx, model::Feature& f)
             ImGui::SameLine();
             ImGui::Checkbox("Results", &fea.showResults);
             ImGui::SetNextItemWidth(-FLT_MIN);
+            if (rt->modal && fea.field == fea::ResultField::VonMises)
+                fea.field = fea::ResultField::DisplacementMagnitude;
             if (ImGui::BeginCombo("##field", fea::fieldName(fea.field))) {
-                for (auto fld : {fea::ResultField::VonMises, fea::ResultField::DisplacementMagnitude,
-                                 fea::ResultField::DisplacementX, fea::ResultField::DisplacementY,
-                                 fea::ResultField::DisplacementZ})
+                for (auto fld : fieldsFor(rt))
                     if (ImGui::Selectable(fea::fieldName(fld), fea.field == fld))
                         fea.field = fld;
                 ImGui::EndCombo();
@@ -259,7 +325,69 @@ void drawAnalysisPanel(AppContext& ctx, model::Feature& f)
             }
         }
         ImGui::Checkbox("Mesh edges", &fea.showMeshEdges);
+
+        // Section view
+        ImGui::Checkbox("Section", &fea.section);
+        if (fea.section) {
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(60);
+            ImGui::Combo("##axis", &fea.sectionAxis, "X\0Y\0Z\0");
+            ImGui::SameLine();
+            ImGui::Checkbox("Flip", &fea.sectionFlip);
+            float pos = float(fea.sectionPosition);
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (ImGui::SliderFloat("##secpos", &pos, 0.0f, 1.0f, "position %.3f"))
+                fea.sectionPosition = pos;
+        }
+        // Probe
+        if (rt->result) {
+            ImGui::Checkbox("Probe (click to pin values)", &fea.probeMode);
+            if (!fea.probes.empty()) {
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Clear"))
+                    fea.probes.clear();
+            }
+        }
+        if (ImGui::Button("Export VTK..."))
+            exportVtkCommand(ctx, id);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Mesh and results as a VTK unstructured grid (.vtu) for ParaView");
     }
+}
+
+bool analysisProbe(AppContext& ctx, const ImVec2& origin, const ImVec2& size, bool hovered, bool clicked)
+{
+    auto& fea = ctx.fea;
+    const FeatureId shown = fea.shownAnalysis;
+    const AnalysisRuntime* rt = fea.runtime(shown);
+    if (!fea.probeMode || !rt || !rt->result || !fea.showResults || !fea.meshUpToDate(ctx.doc, shown))
+        return false;
+    float range[2];
+    const MeshData* surf = fea.displaySurface(shown, range);
+    if (!surf || surf->scalars.empty())
+        return false;
+    const std::uint64_t key = fea.displayKey(shown);
+    if (key != fea.probesKey) {
+        fea.probes.clear();
+        fea.probesKey = key;
+    }
+    if (!hovered)
+        return false;
+    const ImVec2 fb = ImGui::GetIO().DisplayFramebufferScale;
+    const ImVec2 m = ImGui::GetIO().MousePos;
+    if (m.x < origin.x || m.y < origin.y || m.x > origin.x + size.x || m.y > origin.y + size.y)
+        return false;
+    const render::Ray ray = ctx.camera.rayThrough((m.x - origin.x) * fb.x, (m.y - origin.y) * fb.y);
+    fea::ProbeHit hit;
+    if (!fea::probeSurface(*surf, ray.origin, ray.dir, hit))
+        return false;
+    ImGui::SetTooltip("%s: %.4g %s\nat %.2f, %.2f, %.2f", fea::fieldName(fea.field), double(hit.value),
+                      fea::fieldUnit(fea.field), hit.point.x, hit.point.y, hit.point.z);
+    if (clicked) {
+        fea.probes.push_back({hit.point, hit.value});
+        return true;
+    }
+    return false;
 }
 
 // ---- viewport overlays -------------------------------------------------------------------
@@ -310,6 +438,13 @@ void drawAnalysisOverlay(AppContext& ctx, ImDrawList* dl, const ImVec2& origin, 
                     arrow(dl, tail, at, col, 2.0f);
                     if (drawn == 1)
                         outlinedText(dl, ImVec2(tail.x + 4, tail.y - 16), col, num(p, "MPa").c_str());
+                } else if (bc->type() == model::MeshRefinementFeature::kType) {
+                    // Mesh refinement: a small grid symbol.
+                    dl->AddRectFilled(ImVec2(at.x - 6, at.y - 6), ImVec2(at.x + 6, at.y + 6), IM_COL32(12, 12, 14, 200));
+                    for (int k = -1; k <= 1; ++k) {
+                        dl->AddLine(ImVec2(at.x + 4.0f * float(k), at.y - 5), ImVec2(at.x + 4.0f * float(k), at.y + 5), col);
+                        dl->AddLine(ImVec2(at.x - 5, at.y + 4.0f * float(k)), ImVec2(at.x + 5, at.y + 4.0f * float(k)), col);
+                    }
                 } else {
                     // Fixed support: a small "ground" symbol.
                     dl->AddCircleFilled(at, 6.0f, IM_COL32(12, 12, 14, 200));
@@ -330,8 +465,12 @@ void drawAnalysisOverlay(AppContext& ctx, ImDrawList* dl, const ImVec2& origin, 
     if (rt && rt->result && fea.showResults && fea.meshUpToDate(ctx.doc, shown)) {
         float range[2];
         if (fea.displaySurface(shown, range)) {
-            char title[96];
-            std::snprintf(title, sizeof(title), "%s [%s]", fea::fieldName(fea.field), fea::fieldUnit(fea.field));
+            char title[128];
+            if (rt->modal && rt->mode < int(rt->modal->frequencies.size()))
+                std::snprintf(title, sizeof(title), "Mode %d: %.5g Hz [%s, relative]", rt->mode + 1,
+                              rt->modal->frequencies[std::size_t(rt->mode)], fea::fieldName(fea.field));
+            else
+                std::snprintf(title, sizeof(title), "%s [%s]", fea::fieldName(fea.field), fea::fieldUnit(fea.field));
             const float barW = 18.0f, barH = std::min(240.0f, size.y * 0.45f);
             const float boxW = std::max(ImGui::CalcTextSize(title).x, barW + 80.0f) + 24.0f;
             const float boxX = origin.x + size.x - boxW - 8.0f;
@@ -361,6 +500,25 @@ void drawAnalysisOverlay(AppContext& ctx, ImDrawList* dl, const ImVec2& origin, 
             outlinedText(dl, ImVec2(p0.x - 4, p0.y + barH + 10), IM_COL32(180, 185, 195, 255), foot);
             if (!fea.resultUpToDate(ctx.doc, shown))
                 outlinedText(dl, ImVec2(p0.x - 4, p0.y + barH + 28), IM_COL32(255, 190, 80, 255), "Outdated");
+
+            // Pinned probe values
+            if (fea.probesKey == fea.displayKey(shown))
+                for (const auto& pr : fea.probes) {
+                    bool vis = false;
+                    const ImVec2 at = toScreen(pr.point, vis);
+                    if (!vis)
+                        continue;
+                    char buf[64];
+                    std::snprintf(buf, sizeof(buf), "%.4g", double(pr.value));
+                    const ImVec2 ts = ImGui::CalcTextSize(buf);
+                    const ImVec2 box(at.x + 10.0f, at.y - ts.y - 10.0f);
+                    dl->AddLine(at, ImVec2(box.x, box.y + ts.y + 4.0f), IM_COL32(240, 240, 240, 220), 1.2f);
+                    dl->AddCircleFilled(at, 3.5f, IM_COL32(15, 15, 18, 255));
+                    dl->AddCircleFilled(at, 2.5f, IM_COL32(255, 255, 255, 255));
+                    dl->AddRectFilled(ImVec2(box.x - 3, box.y - 2), ImVec2(box.x + ts.x + 3, box.y + ts.y + 2),
+                                      IM_COL32(18, 20, 24, 220), 3.0f);
+                    dl->AddText(box, IM_COL32(240, 240, 240, 255), buf);
+                }
         }
     }
 

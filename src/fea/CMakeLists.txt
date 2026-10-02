@@ -5,9 +5,10 @@ add_library(cadforge_fea STATIC
     MeshUtils.cpp
     Mesher.cpp
     Solver.cpp
-    Post.cpp)
+    Post.cpp
+    Export.cpp)
 target_link_libraries(cadforge_fea
     PUBLIC  cadforge::core
-    PRIVATE cadforge::netgen cadforge::amgcl Eigen3::Eigen)
+    PRIVATE cadforge::netgen cadforge::amgcl cadforge::spectra Eigen3::Eigen)
 cadforge_set_warnings(cadforge_fea)
 add_library(cadforge::fea ALIAS cadforge_fea)

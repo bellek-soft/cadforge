@@ -35,3 +35,9 @@ else()
     target_compile_options(cadforge_planegcs PRIVATE -w)
 endif()
 add_library(cadforge::planegcs ALIAS cadforge_planegcs)
+
+# Spectra 1.0.1: header-only sparse eigensolvers (MPL-2.0), vendored. Needs Eigen.
+add_library(cadforge_spectra INTERFACE)
+target_include_directories(cadforge_spectra SYSTEM INTERFACE spectra/include)
+target_link_libraries(cadforge_spectra INTERFACE Eigen3::Eigen)
+add_library(cadforge::spectra ALIAS cadforge_spectra)

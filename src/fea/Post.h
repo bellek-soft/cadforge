@@ -7,6 +7,8 @@
 
 #include <glm/glm.hpp>
 
+#include <cstdint>
+
 namespace cf::fea {
 
 enum class ResultField { None = 0, VonMises, DisplacementMagnitude, DisplacementX, DisplacementY, DisplacementZ };
@@ -18,7 +20,24 @@ struct SurfaceOptions {
     ResultField field = ResultField::None;
     double deformationScale = 0.0; // 0 = undeformed
     bool elementEdges = true;      // draw the mesh wireframe as edges
+
+    // Section view: everything on the positive side of the plane dot(n, p) = offset is
+    // removed and the cut through the volume mesh is shown (with the field).
+    bool section = false;
+    Vec3 sectionNormal{1.0, 0.0, 0.0}; // unit
+    double sectionOffset = 0.0;
 };
+
+/// Hit of a ray with a display surface.
+struct ProbeHit {
+    Vec3 point{0.0};
+    double distance = 0.0;  // along the ray
+    float value = 0.0f;     // interpolated scalar (0 without scalars)
+    std::uint32_t face = 0; // B-Rep face id (0 = section cap / unknown)
+};
+
+/// First intersection of the ray (origin, unit dir) with the triangles of `surface`.
+bool probeSurface(const MeshData& surface, const Vec3& origin, const Vec3& dir, ProbeHit& hit);
 
 /// Boundary surface of the mesh. Faces keep their B-Rep face id (pickable),
 /// `scalars` holds the chosen field, edges are the boundary element edges.

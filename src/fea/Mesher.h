@@ -5,14 +5,22 @@
 #include "fea/FeaTypes.h"
 
 #include <string>
+#include <vector>
 
 namespace cf::fea {
+
+/// Smaller elements on some B-Rep faces.
+struct LocalMeshSize {
+    std::vector<int> faces; // 1-based B-Rep face ids (MeshData::faceIds)
+    double size = 1.0;      // mm
+};
 
 struct MeshSettings {
     double maxSize = 0.0;   // target element size in mm (<= 0: automatic, diagonal / 20)
     double minSize = 0.0;   // lower bound for local refinement (0 = none)
     double grading = 0.3;   // 0 = uniform ... 1 = aggressive local refinement
     ElementOrder order = ElementOrder::Quadratic;
+    std::vector<LocalMeshSize> localSizes;
 };
 
 /// Builds a tetrahedral mesh of the closed solid described by `surface`

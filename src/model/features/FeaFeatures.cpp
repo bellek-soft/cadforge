@@ -39,10 +39,11 @@ const StaticAnalysisFeature* asAnalysis(const Feature* f)
 
 void registerFeaFeatures(FeatureRegistry& r)
 {
-    r.add(info<StaticAnalysisFeature>(StaticAnalysisFeature::kType, "Static Analysis"));
+    r.add(info<StaticAnalysisFeature>(StaticAnalysisFeature::kType, "Analysis"));
     r.add(info<FixedSupportFeature>(FixedSupportFeature::kType, "Fixed Support"));
     r.add(info<ForceFeature>(ForceFeature::kType, "Force"));
     r.add(info<PressureFeature>(PressureFeature::kType, "Pressure"));
+    r.add(info<MeshRefinementFeature>(MeshRefinementFeature::kType, "Mesh Refinement"));
 }
 
 // ---- StaticAnalysis -----------------------------------------------------------------
@@ -53,6 +54,11 @@ StaticAnalysisFeature::StaticAnalysisFeature()
     setColor({0.85f, 0.55f, 0.35f, 1.0f});
     Property& t = props().add(makeRef(kTarget, "Solid", "Model"));
     t.tooltip = "The solid to analyse";
+    Property& at = props().add(makeEnum(kAnalysisType, "Type", Static, {"Static structural", "Modal (frequencies)"}, "Model"));
+    at.tooltip = "Static: stresses and deformation under loads. Modal: natural frequencies and mode shapes "
+                 "(uses supports, ignores loads)";
+    Property& nm = props().add(makeInt(kModes, "Modes", 6, 1, 50, "Model"));
+    nm.tooltip = "Number of natural frequencies to compute (modal analysis)";
 
     const fea::Material steel = fea::materialLibrary().front();
     props().add(makeEnum(kMaterial, "Preset", 0, materialNames(), "Material"));
@@ -178,6 +184,14 @@ ForceFeature::ForceFeature()
     f.tooltip = "Total force, distributed over the faces by area";
 }
 
+MeshRefinementFeature::MeshRefinementFeature()
+{
+    setColor({0.55f, 0.85f, 0.45f, 1.0f});
+    Property& h = props().add(makeDouble(kSize, "Element size", 1.0, 0.01, 1e6, "mm", "Refinement"));
+    h.speed = 0.05;
+    h.tooltip = "Element size on the selected faces (graded smoothly into the global size)";
+}
+
 PressureFeature::PressureFeature()
 {
     setColor({0.85f, 0.40f, 0.85f, 1.0f});
@@ -197,6 +211,47 @@ std::vector<FeatureId> analysesOf(const Document& doc, FeatureId solid)
     return out;
 }
 
+fea::MeshSettings meshSettingsOf(const Document& doc, FeatureId analysisId)
+{
+    const auto* a = asAnalysis(doc.find(analysisId));
+    if (!a)
+        return {};
+    fea::MeshSettings s = a->meshSettings();
+    for (FeatureId id : doc.nestedChildren(analysisId)) {
+        const Feature* f = doc.find(id);
+        if (f && f->type() == MeshRefinementFeature::kType && f->state() == FeatureState::Ok)
+            s.localSizes.push_back({static_cast<const FeaBoundaryFeature*>(f)->faces(),
+                                    f->props().get<double>(MeshRefinementFeature::kSize)});
+    }
+    return s;
+}
+
+fea::ModalSetup buildModalSetup(const Document& doc, FeatureId analysisId)
+{
+    const auto* a = asAnalysis(doc.find(analysisId));
+    if (!a)
+        throw geom::GeomError("Not an analysis");
+    if (a->state() != FeatureState::Ok)
+        throw geom::GeomError(a->error());
+    fea::ModalSetup s;
+    s.material = a->material();
+    s.modes = a->props().get<int>(StaticAnalysisFeature::kModes);
+    for (FeatureId id : doc.nestedChildren(analysisId)) {
+        const Feature* f = doc.find(id);
+        if (!f || f->type() != FixedSupportFeature::kType)
+            continue;
+        if (f->state() != FeatureState::Ok)
+            throw geom::GeomError(f->name() + ": " + f->error());
+        s.supports.push_back({static_cast<const FeaBoundaryFeature*>(f)->faces(), f->props().get<bool>("fixX"),
+                              f->props().get<bool>("fixY"), f->props().get<bool>("fixZ")});
+    }
+    if (s.supports.empty())
+        throw geom::GeomError("Add a fixed support (select faces, then 'Fixed')");
+    if (!(s.material.density > 0.0))
+        throw geom::GeomError("A modal analysis needs a positive density");
+    return s;
+}
+
 fea::StaticSetup buildStaticSetup(const Document& doc, FeatureId analysisId)
 {
     const auto* a = asAnalysis(doc.find(analysisId));
@@ -212,7 +267,7 @@ fea::StaticSetup buildStaticSetup(const Document& doc, FeatureId analysisId)
 
     for (FeatureId id : doc.nestedChildren(analysisId)) {
         const Feature* f = doc.find(id);
-        if (!f)
+        if (!f || f->type() == MeshRefinementFeature::kType)
             continue;
         if (f->state() != FeatureState::Ok)
             throw geom::GeomError(f->name() + ": " + f->error());

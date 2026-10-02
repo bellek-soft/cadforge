@@ -187,10 +187,23 @@ confused. A future history layer (`BRepTools_History` of booleans / fillets) can
 * **Validation (unit tests):** uniform tension (exact for Tet4/Tet10), Tet10 cantilever vs. beam theory
   (0.1903 vs 0.1905 mm), gravity + pressure equilibrium, under-constrained detection for both solver paths.
 
+Added in v0.5:
+
+* **Modal analysis:** the same analysis feature with *Type = Modal*. Stiffness and consistent mass matrices
+  (exact Tet4 / Tet10 mass integrals) share the equation numbering and assembly code with the static solver;
+  `K phi = omega^2 M phi` is solved with Spectra's shift-invert Lanczos (`SymGEigsShiftSolver`) on a sparse
+  LDL^T factorization of K. Mode shapes are normalized to max |u| = 1; effective modal masses are reported.
+  Validated against Euler-Bernoulli (cantilever f1: 834.6 Hz vs 835.5 Hz).
+* **Local mesh refinement:** `FEA::MeshRefinement` features (faces + size) become `MeshSettings::localSizes`;
+  the mesher restricts Netgen's size field at points sampled over those faces before surface meshing.
+* **Section view:** `fea::resultSurface` clips the boundary surface against a plane and appends the cut through
+  the volume mesh (Tet10 split into 8 linear sub-tets, field interpolated) - all on the CPU, so picking, probing
+  and rendering need no special cases.
+* **Probe:** ray / display-surface intersection (`fea::probeSurface`) with interpolated field values.
+* **VTK export:** `fea::writeVtu` (ASCII XML unstructured grid; Tet10 = VTK_QUADRATIC_TETRA, same node order).
+
 Next steps for FEA:
 
-* Results export (VTK / CSV), clipping plane and probe tool.
 * Remote / bonded contacts between bodies, assemblies.
-* Modal analysis (eigenfrequencies) re-using the assembly code (needs a sparse eigen solver, e.g. Spectra).
-* Local mesh refinement on selected faces; mesh quality report.
+* Mesh quality report; free-free modal analysis (negative shift).
 * Multithreaded assembly and stress recovery.

@@ -32,6 +32,7 @@ A parametric 3D CAD desktop application in modern C++20.
 | View | Turntable orbit, pan, zoom-to-cursor, fit, standard views, perspective/orthographic, adaptive grid, axis triad |
 | History | Unlimited-ish (200 steps) undo/redo of every change |
 | Analysis | Static study per solid, material library (or custom E, ν, ρ, yield), fixed supports (per axis), forces, pressures, gravity; Tet4/Tet10 mesh with adjustable size; background meshing/solving with progress; contour plots of von Mises / displacement with deformed shape, legend, safety factor and reaction check |
+| Analysis+ | Modal analysis (natural frequencies, mode shapes, effective mass) with Spectra; local mesh refinement on selected faces; section view through the mesh (X/Y/Z plane, flip); probe tool (hover / click to pin values); VTK export (.vtu) of mesh, displacements, stresses and mode shapes for ParaView |
 
 ## Building
 
@@ -125,6 +126,10 @@ again; vcpkg installs what is missing.
 4. Press **Solve** (`F5`). Results replace the solid in the view; choose the field, deformation scale and
    mesh edges in the study panel. Any later change marks the results as *outdated*.
 
+Set **Type** to *Modal* in the study properties for natural frequencies: supports are used, loads are
+ignored; pick a mode in the table to see its shape. **Refine** (toolbar) on selected faces adds a local
+element size. The study panel also has the section view, the probe and **Export VTK**.
+
 Units are mm, N, MPa (N/mm²), t/mm³ and mm/s². *File > Load Analysis Demo* sets up and solves a
 small cantilever plate.
 
@@ -143,7 +148,7 @@ src/model    parametric document, features, recompute, undo, I/O  no GL, no UI
 src/render   OpenGL 4.1 renderer, camera, picking                 knows meshes, not features
 src/app      GLFW + ImGui application, panels, commands
 tests        kernel + model unit tests (no framework needed)
-third_party  vendored glad (GL 4.1 loader), portable-file-dialogs, AMGCL (header-only), PlaneGCS
+third_party  vendored glad (GL 4.1 loader), portable-file-dialogs, AMGCL and Spectra (header-only), PlaneGCS
 docs         architecture notes and roadmap (CSG, FEA)
 ```
 
@@ -152,5 +157,5 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and how to exten
 ## License notes
 
 OpenCASCADE is LGPL-2.1 with an exception, Netgen is LGPL-2.1, PlaneGCS (from FreeCAD, vendored in
-`third_party/planegcs` with its license) is LGPL-2.1+, Eigen is MPL-2.0, AMGCL is MIT; Dear ImGui, ImGuizmo, GLFW, glm, nlohmann-json and glad are MIT/zlib-style;
+`third_party/planegcs` with its license) is LGPL-2.1+, Eigen and Spectra (vendored, header-only) are MPL-2.0, AMGCL is MIT; Dear ImGui, ImGuizmo, GLFW, glm, nlohmann-json and glad are MIT/zlib-style;
 portable-file-dialogs is WTFPL.

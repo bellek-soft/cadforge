@@ -31,6 +31,8 @@ const char* typeTag(const Feature& f)
     if (t == "FEA::FixedSupport") return "|";
     if (t == "FEA::Force") return ">";
     if (t == "FEA::Pressure") return "P";
+    if (t == "FEA::MeshRefinement") return "M";
+    if (t == "FEA::StaticAnalysis" && f.props().get<int>("analysisType") == 1) return "~A";
     return "#";
 }
 

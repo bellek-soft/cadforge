@@ -320,9 +320,15 @@ void drawViewport(AppContext& ctx)
     dl->AddImage(static_cast<ImTextureID>(static_cast<std::uintptr_t>(ctx.renderer.colorTexture())), pos,
                  ImVec2(pos.x + size.x, pos.y + size.y), ImVec2(0, 1), ImVec2(1, 0));
 
+    // --- probe (analysis results) ---
+    const bool leftClick = hovered && !gizmoBusy && ImGui::IsMouseReleased(ImGuiMouseButton_Left) &&
+                           !g_in.dragging && g_in.pressButton == ImGuiMouseButton_Left && !io.KeyAlt &&
+                           !g_in.gizmoWasUsing;
+    const bool probed = !sketching && analysisProbe(ctx, pos, size, (hovered && !ImGui::IsAnyMouseDown()) || leftClick,
+                                                    leftClick);
+
     // --- click selection (left release without drag) ---
-    if (hovered && !gizmoBusy && !sketching && ImGui::IsMouseReleased(ImGuiMouseButton_Left) && !g_in.dragging &&
-        g_in.pressButton == ImGuiMouseButton_Left && !io.KeyAlt && !g_in.gizmoWasUsing) {
+    if (leftClick && !sketching && !probed) {
         const int radius = ctx.pickFilter == PickFilter::Edge ? int(5 * fbScale.x) : 1;
         const auto hit = ctx.renderer.pick(ctx.camera, ctx.scene.items(), ctx.pickFilter, int(mx), int(my),
                                            radius, ctx.settings.edgeWidth * fbScale.x);

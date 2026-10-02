@@ -15,6 +15,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 namespace cf::model {
 class Document;
@@ -29,7 +30,11 @@ struct AnalysisRuntime {
     std::uint64_t meshKey = 0;
     double meshSeconds = 0.0;
 
+    /// Displayed result: the static solution, or the selected mode shape of a modal solution
+    /// (displacement = mode shape normalised to max 1, no stresses).
     std::shared_ptr<const fea::StaticResult> result;
+    std::shared_ptr<const fea::ModalResult> modal; // set for modal analyses
+    int mode = 0;                                  // displayed mode (0-based)
     std::uint64_t solveKey = 0;
 
     std::string message; // last error, if any
@@ -73,6 +78,28 @@ public:
     bool autoDeformation = true;
     double deformationScale = 1.0; // used when !autoDeformation
     bool showMeshEdges = true;
+
+    // Section view through the mesh (axis-aligned plane).
+    bool section = false;
+    int sectionAxis = 0;          // 0 = X, 1 = Y, 2 = Z
+    double sectionPosition = 0.5; // 0..1 across the mesh bounds
+    bool sectionFlip = false;     // keep the other side
+
+    // Probe: hover shows the field value under the cursor; clicks pin markers.
+    bool probeMode = false;
+    struct ProbeMark {
+        Vec3 point{0.0};
+        float value = 0.0f;
+    };
+    std::vector<ProbeMark> probes; // cleared when the displayed field changes
+    std::uint64_t probesKey = 0;
+
+    /// Shows mode `mode` (0-based) of a modal result.
+    void selectMode(FeatureId analysis, int mode);
+    /// Writes mesh + results of an analysis as VTK (.vtu). Returns false and sets `error` on failure.
+    bool exportVtu(FeatureId analysis, const std::string& path, std::string& error) const;
+    /// Section plane (unit normal, offset) for the current settings (only valid with a mesh).
+    bool sectionPlane(FeatureId analysis, Vec3& normal, double& offset) const;
 
     /// Deformation factor actually used for display.
     double effectiveDeformationScale(FeatureId analysis) const;

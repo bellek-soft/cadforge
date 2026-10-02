@@ -2,6 +2,7 @@
 #include "app/AppContext.h"
 
 #include "core/Log.h"
+#include "fea/Export.h"
 #include "fea/Mesher.h"
 #include "fea/Solver.h"
 #include "geom/Tessellator.h"
@@ -38,6 +39,19 @@ const StaticAnalysisFeature* analysisFeature(const model::Document& doc, Feature
     return f && f->type() == StaticAnalysisFeature::kType ? static_cast<const StaticAnalysisFeature*>(f) : nullptr;
 }
 
+/// A mode shape presented as a (displacement-only) static result for display.
+std::shared_ptr<const fea::StaticResult> modeView(const fea::ModalResult& m, int mode)
+{
+    auto r = std::make_shared<fea::StaticResult>();
+    if (mode < 0 || mode >= int(m.shapes.size()))
+        return r;
+    r->displacement = m.shapes[std::size_t(mode)];
+    r->maxDisplacement = 1.0;
+    r->equations = m.equations;
+    r->solver = m.solver;
+    return r;
+}
+
 std::string fmt(const char* f, double a, double b = 0, double c = 0)
 {
     char buf[256];
@@ -55,6 +69,8 @@ struct FeaController::Job {
     MeshData surface;
     fea::MeshSettings meshSettings;
     fea::StaticSetup setup;
+    bool modal = false;
+    fea::ModalSetup modalSetup;
     std::shared_ptr<const fea::VolumeMesh> existingMesh;
 
     std::atomic<bool> cancel{false};
@@ -66,6 +82,7 @@ struct FeaController::Job {
     std::shared_ptr<const fea::VolumeMesh> mesh;
     double meshSeconds = 0.0;
     std::shared_ptr<const fea::StaticResult> result;
+    std::shared_ptr<const fea::ModalResult> modalResult;
     std::string error;
 
     void report(const std::string& s, double p)
@@ -91,7 +108,10 @@ struct FeaController::Job {
                 fea::SolveControl ctl;
                 ctl.cancel = &cancel;
                 ctl.progress = [this](const std::string& s, double p) { report(s, 0.3 + 0.7 * p); };
-                result = std::make_shared<const fea::StaticResult>(fea::solveStatic(*mesh, setup, ctl));
+                if (modal)
+                    modalResult = std::make_shared<const fea::ModalResult>(fea::solveModal(*mesh, modalSetup, ctl));
+                else
+                    result = std::make_shared<const fea::StaticResult>(fea::solveStatic(*mesh, setup, ctl));
             }
         } catch (const std::exception& e) {
             error = e.what();
@@ -122,6 +142,11 @@ std::uint64_t FeaController::currentMeshKey(const model::Document& doc, FeatureI
     std::uint64_t h = mix(0x51ed270b27f0a2bdull, target->resultKey());
     h = mix(h, bits(ms.maxSize));
     h = mix(h, std::uint64_t(ms.order));
+    for (const auto& l : model::meshSettingsOf(doc, id).localSizes) {
+        h = mix(h, bits(l.size));
+        for (int f : l.faces)
+            h = mix(h, std::uint64_t(f));
+    }
     return h;
 }
 
@@ -132,7 +157,7 @@ std::uint64_t FeaController::currentSolveKey(const model::Document& doc, Feature
         return 0;
     std::uint64_t h = mix(currentMeshKey(doc, id), a->resultKey());
     for (FeatureId c : doc.nestedChildren(id))
-        if (const auto* f = doc.find(c))
+        if (const auto* f = doc.find(c); f && f->type() != model::MeshRefinementFeature::kType)
             h = mix(h, f->resultKey());
     return h;
 }
@@ -175,7 +200,7 @@ bool FeaController::start(AppContext& ctx, FeatureId id, bool solve, std::string
     }
     const auto* a = analysisFeature(ctx.doc, id);
     if (!a) {
-        error = "Select a static analysis first";
+        error = "Select an analysis first";
         return false;
     }
     if (a->state() != model::FeatureState::Ok) {
@@ -189,10 +214,14 @@ bool FeaController::start(AppContext& ctx, FeatureId id, bool solve, std::string
     job->solve = solve;
     job->meshKey = currentMeshKey(ctx.doc, id);
     job->solveKey = currentSolveKey(ctx.doc, id);
-    job->meshSettings = a->meshSettings();
+    job->meshSettings = model::meshSettingsOf(ctx.doc, id);
+    job->modal = a->isModal();
     if (solve) {
         try {
-            job->setup = model::buildStaticSetup(ctx.doc, id);
+            if (job->modal)
+                job->modalSetup = model::buildModalSetup(ctx.doc, id);
+            else
+                job->setup = model::buildStaticSetup(ctx.doc, id);
         } catch (const std::exception& e) {
             error = a->name() + ": " + e.what();
             return false;
@@ -263,6 +292,7 @@ void FeaController::poll(AppContext& ctx)
         rt.meshKey = job->meshKey;
         rt.meshSeconds = job->meshSeconds;
         rt.result.reset(); // a new mesh invalidates old results
+        rt.modal.reset();
         rt.solveKey = 0;
     }
     if (!job->error.empty()) {
@@ -271,7 +301,22 @@ void FeaController::poll(AppContext& ctx)
         return;
     }
     rt.message.clear();
-    if (job->result) {
+    if (job->modalResult) {
+        rt.modal = job->modalResult;
+        rt.mode = 0;
+        rt.result = modeView(*rt.modal, 0);
+        rt.solveKey = job->solveKey;
+        shownAnalysis = job->analysis;
+        showResults = true;
+        if (field == fea::ResultField::VonMises)
+            field = fea::ResultField::DisplacementMagnitude;
+        std::string freqs;
+        for (std::size_t i = 0; i < rt.modal->frequencies.size() && i < 4; ++i)
+            freqs += fmt(i ? ", %.4g" : "%.4g", rt.modal->frequencies[i]);
+        ctx.status(name + ": " + std::to_string(rt.modal->frequencies.size()) + " modes - " + freqs +
+                   (rt.modal->frequencies.size() > 4 ? ", ... Hz" : " Hz"));
+    } else if (job->result) {
+        rt.modal.reset();
         rt.result = job->result;
         rt.solveKey = job->solveKey;
         shownAnalysis = job->analysis;
@@ -329,6 +374,8 @@ std::uint64_t FeaController::displayKey(FeatureId id) const
     h = mix(h, withResult ? std::uint64_t(field) : 0);
     h = mix(h, bits(effectiveDeformationScale(id)));
     h = mix(h, showMeshEdges ? 1 : 0);
+    h = mix(h, section ? 1 + std::uint64_t(sectionAxis) * 2 + (sectionFlip ? 1 : 0) : 0);
+    h = mix(h, section ? bits(sectionPosition) : 0);
     return h;
 }
 
@@ -345,6 +392,7 @@ const MeshData* FeaController::displaySurface(FeatureId id, float range[2])
         o.field = withResult ? field : fea::ResultField::None;
         o.deformationScale = effectiveDeformationScale(id);
         o.elementEdges = showMeshEdges;
+        o.section = sectionPlane(id, o.sectionNormal, o.sectionOffset);
         c.surface = fea::resultSurface(*rt->mesh, withResult ? rt->result.get() : nullptr, o);
         c.range[0] = 0.0f;
         c.range[1] = 1.0f;
@@ -358,6 +406,53 @@ const MeshData* FeaController::displaySurface(FeatureId id, float range[2])
     range[0] = c.range[0];
     range[1] = c.range[1];
     return &c.surface;
+}
+
+void FeaController::selectMode(FeatureId id, int mode)
+{
+    auto it = m_runtimes.find(id);
+    if (it == m_runtimes.end() || !it->second.modal)
+        return;
+    AnalysisRuntime& rt = it->second;
+    mode = std::clamp(mode, 0, std::max(0, int(rt.modal->shapes.size()) - 1));
+    if (mode == rt.mode && rt.result)
+        return;
+    rt.mode = mode;
+    rt.result = modeView(*rt.modal, mode);
+}
+
+bool FeaController::sectionPlane(FeatureId id, Vec3& normal, double& offset) const
+{
+    const auto* rt = runtime(id);
+    if (!section || !rt || !rt->mesh)
+        return false;
+    BoundingBox bb;
+    for (const auto& p : rt->mesh->nodes)
+        bb.add(p);
+    if (!bb.valid())
+        return false;
+    const int ax = std::clamp(sectionAxis, 0, 2);
+    normal = Vec3(0.0);
+    normal[ax] = sectionFlip ? -1.0 : 1.0;
+    const double pos = bb.min[ax] + std::clamp(sectionPosition, 0.0, 1.0) * (bb.max[ax] - bb.min[ax]);
+    offset = sectionFlip ? -pos : pos;
+    return true;
+}
+
+bool FeaController::exportVtu(FeatureId id, const std::string& path, std::string& error) const
+{
+    const auto* rt = runtime(id);
+    if (!rt || !rt->mesh) {
+        error = "Mesh the analysis first";
+        return false;
+    }
+    try {
+        fea::writeVtu(path, *rt->mesh, rt->modal ? nullptr : rt->result.get(), rt->modal.get());
+        return true;
+    } catch (const std::exception& e) {
+        error = e.what();
+        return false;
+    }
 }
 
 } // namespace cf::app

@@ -106,4 +106,23 @@ struct StaticResult {
     double solveSeconds = 0.0;
 };
 
+// ---- modal analysis ------------------------------------------------------------
+
+struct ModalSetup {
+    Material material;
+    std::vector<FixedSupport> supports;
+    int modes = 6; // number of lowest natural frequencies to compute
+};
+
+struct ModalResult {
+    std::vector<double> frequencies;           // Hz, ascending
+    std::vector<std::vector<Vec3>> shapes;     // per mode: per node displacement, max |u| = 1
+    std::vector<Vec3> effectiveMassRatio;      // per mode: effective mass / total free mass in x, y, z
+    double totalMass = 0.0;                    // t (mass of the free DOFs, per direction)
+    int equations = 0;
+    std::string solver;
+    double assemblySeconds = 0.0;
+    double solveSeconds = 0.0;
+};
+
 } // namespace cf::fea
