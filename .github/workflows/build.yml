@@ -48,7 +48,7 @@ jobs:
       VCPKG_DISABLE_METRICS: "1"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install system packages (Linux)
         if: runner.os == 'Linux'
@@ -86,7 +86,9 @@ jobs:
 
       - name: Configure (builds the dependencies on a cold cache)
         shell: bash
-        run: cmake --preset release
+        run: |
+          set -o pipefail
+          cmake --preset release 2>&1 | tee configure.log
 
       - name: Save vcpkg binary cache
         if: always()
@@ -95,20 +97,34 @@ jobs:
           path: vcpkg-cache
           key: vcpkg-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}
 
-      - name: Show vcpkg logs on failure
+      - name: Report configure failure
         if: failure()
         shell: bash
         run: |
-          find external/vcpkg/buildtrees -name "*-err.log" -o -name "config-*-out.log" 2>/dev/null | head -20 | while read f; do
-            echo "::group::$f"; tail -n 80 "$f"; echo "::endgroup::"; done
+          .github/scripts/annotate-tail.sh "Configure" configure.log
+          # The most recent vcpkg port logs (the failing port is usually among them).
+          logs=$(ls -t $(find external/vcpkg/buildtrees -name "*-err.log" -o -name "*-out.log" 2>/dev/null) 2>/dev/null | head -4)
+          .github/scripts/annotate-tail.sh "vcpkg" $logs
 
       - name: Build
         shell: bash
-        run: cmake --build --preset release --parallel
+        run: |
+          set -o pipefail
+          cmake --build --preset release --parallel 2>&1 | tee build.log
 
       - name: Test
         shell: bash
-        run: ctest --preset release
+        run: |
+          set -o pipefail
+          ctest --preset release --output-on-failure 2>&1 | tee test.log
+
+      - name: Report build / test failure
+        if: failure()
+        shell: bash
+        run: |
+          grep -iE "error|fatal" build.log 2>/dev/null | head -60 > build-errors.log || true
+          .github/scripts/annotate-tail.sh "Build errors" build-errors.log
+          .github/scripts/annotate-tail.sh "Tests" test.log
 
       - name: Package
         shell: bash
